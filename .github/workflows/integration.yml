@@ -1,0 +1,490 @@
+name: Integration tests
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Run tests or remove retained fixtures only
+        required: true
+        default: run
+        type: choice
+        options:
+          - run
+          - cleanup-only
+      suite:
+        description: Service suite to deploy and validate
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - iam
+          - s3
+          - cloudformation
+          - lambda
+          - ssm
+          - kms
+          - ec2
+          - eks
+      automatic_cleanup:
+        description: Delete deployed AWS fixtures after the run
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: goawshound-aws-integration-tests
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    name: AWS integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      PRIMARY_ACCOUNT_ID: ${{ secrets.AWS_INTEGRATION_PRIMARY_ACCOUNT_ID }}
+      SECONDARY_ACCOUNT_ID: ${{ secrets.AWS_INTEGRATION_SECONDARY_ACCOUNT_ID }}
+      PRIMARY_OIDC_ROLE_ARN: ${{ secrets.AWS_INTEGRATION_PRIMARY_OIDC_ROLE_ARN }}
+      SECONDARY_OIDC_ROLE_ARN: ${{ secrets.AWS_INTEGRATION_SECONDARY_OIDC_ROLE_ARN }}
+      PRIMARY_STACK: goawshound-integration-primary
+      SECONDARY_STACK: goawshound-integration-secondary
+      SERVICES_STACK: goawshound-integration-services
+      PRIMARY_ROLE_NAME: goawshound-integration-cross-account
+      EXTERNAL_USER_NAME: goawshound-integration-external
+      BUCKET_NAME: goawshound-integration-${{ secrets.AWS_INTEGRATION_PRIMARY_ACCOUNT_ID }}-us-east-1
+      TEST_SUITE: ${{ inputs.suite || 'all' }}
+      SCHEMA_PATH: schema/schema.json
+
+    steps:
+      - name: Check out awshound
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Isolate temporary AWS credentials
+        run: |
+          echo "AWS_SHARED_CREDENTIALS_FILE=${RUNNER_TEMP}/goawshound-aws-credentials" >> "$GITHUB_ENV"
+          echo "AWS_CONFIG_FILE=${RUNNER_TEMP}/goawshound-aws-config" >> "$GITHUB_ENV"
+
+      - name: Set up Go
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Set up Python
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+
+      - name: Build awshound
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        run: |
+          mkdir -p integration/output
+          go build -trimpath -o integration/output/awshound ./cmd/awshound
+          aws --version
+
+      - name: Configure primary-account credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PRIMARY_OIDC_ROLE_ARN }}
+          role-session-name: goawshound-primary-${{ github.run_id }}
+          aws-profile: goawshound-primary
+          allowed-account-ids: ${{ env.PRIMARY_ACCOUNT_ID }}
+          output-env-credentials: false
+          unset-current-credentials: true
+
+      - name: Configure secondary-account credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.SECONDARY_OIDC_ROLE_ARN }}
+          role-session-name: goawshound-secondary-${{ github.run_id }}
+          aws-profile: goawshound-secondary
+          allowed-account-ids: ${{ env.SECONDARY_ACCOUNT_ID }}
+          output-env-credentials: false
+          unset-current-credentials: true
+
+      - name: Deploy and seed real AWS infrastructure
+        id: deploy
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        timeout-minutes: 55
+        run: |
+          set -euo pipefail
+          {
+            deploy_stack() {
+              local profile="$1"
+              local stack="$2"
+              shift 2
+              if aws cloudformation deploy --profile "$profile" --stack-name "$stack" --disable-rollback "$@"; then
+                return
+              fi
+              aws cloudformation describe-stack-events \
+                --profile "$profile" \
+                --stack-name "$stack" \
+                --max-items 50 \
+                --query 'StackEvents[].[Timestamp,LogicalResourceId,ResourceType,ResourceStatus,ResourceStatusReason]' \
+                --output table || true
+              return 1
+            }
+
+            deploy_stack goawshound-secondary "$SECONDARY_STACK" \
+              --template-file integration/secondary.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --no-fail-on-empty-changeset \
+              --tags managed-by=goawshound-integration-tests \
+              --parameter-overrides \
+                PrimaryAccountId="$PRIMARY_ACCOUNT_ID" \
+                PrimaryRoleName="$PRIMARY_ROLE_NAME" \
+                BucketName="$BUCKET_NAME" \
+                ExternalUserName="$EXTERNAL_USER_NAME"
+
+            deploy_stack goawshound-primary "$PRIMARY_STACK" \
+              --template-file integration/primary.yaml \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --no-fail-on-empty-changeset \
+              --tags managed-by=goawshound-integration-tests \
+              --parameter-overrides \
+                SecondaryAccountId="$SECONDARY_ACCOUNT_ID" \
+                ExternalUserName="$EXTERNAL_USER_NAME" \
+                PrimaryRoleName="$PRIMARY_ROLE_NAME" \
+                BucketName="$BUCKET_NAME"
+
+            case "$TEST_SUITE" in
+              all|ssm|kms|ec2|eks)
+                deploy_stack goawshound-primary "$SERVICES_STACK" \
+                  --template-file integration/services.yaml \
+                  --capabilities CAPABILITY_NAMED_IAM \
+                  --no-fail-on-empty-changeset \
+                  --tags managed-by=goawshound-integration-tests \
+                  --parameter-overrides TestSuite="$TEST_SUITE"
+                ;;
+            esac
+
+            case "$TEST_SUITE" in
+              all|ssm|ec2)
+                integration_instance_id="$(aws cloudformation describe-stacks \
+                  --profile goawshound-primary \
+                  --stack-name "$SERVICES_STACK" \
+                  --query "Stacks[0].Outputs[?OutputKey=='InstanceId'].OutputValue | [0]" \
+                  --output text)"
+                printf 'GOAWSHOUND_INTEGRATION_INSTANCE_ID=%s\n' "$integration_instance_id" >> "$GITHUB_ENV"
+                ;;
+            esac
+            case "$TEST_SUITE" in
+              all|kms)
+                integration_kms_key_id="$(aws cloudformation describe-stacks \
+                  --profile goawshound-primary \
+                  --stack-name "$SERVICES_STACK" \
+                  --query "Stacks[0].Outputs[?OutputKey=='KMSKeyId'].OutputValue | [0]" \
+                  --output text)"
+                printf 'GOAWSHOUND_INTEGRATION_KMS_KEY_ID=%s\n' "$integration_kms_key_id" >> "$GITHUB_ENV"
+                ;;
+            esac
+            case "$TEST_SUITE" in
+              all|ssm)
+                aws ec2 wait instance-status-ok \
+                  --profile goawshound-primary \
+                  --instance-ids "$integration_instance_id"
+                managed_instance_id=""
+                for attempt in $(seq 1 60); do
+                  managed_instance_id="$(aws ssm describe-instance-information \
+                    --profile goawshound-primary \
+                    --filters "Key=InstanceIds,Values=${integration_instance_id}" \
+                    --query 'InstanceInformationList[0].InstanceId' \
+                    --output text)"
+                  if [ "$managed_instance_id" = "$integration_instance_id" ]; then
+                    break
+                  fi
+                  sleep 10
+                done
+                if [ "$managed_instance_id" != "$integration_instance_id" ]; then
+                  echo "EC2 fixture did not register with SSM"
+                  exit 1
+                fi
+                ;;
+            esac
+
+            case "$TEST_SUITE" in
+              all|s3)
+                printf 'awshound live integration fixture\n' > "${RUNNER_TEMP}/integration-fixture.txt"
+                aws s3api put-object \
+                  --profile goawshound-primary \
+                  --bucket "$BUCKET_NAME" \
+                  --key integration-fixture.txt \
+                  --body "${RUNNER_TEMP}/integration-fixture.txt"
+                ;;
+            esac
+          } 2>&1 | tee integration/deploy.log
+
+      - name: Collect AWS data and build the graph with awshound
+        id: collect
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          case "$TEST_SUITE" in
+            all) collectors=iam,s3,cloudformation,lambda,ssm,kms,ec2,eks ;;
+            iam) collectors=iam ;;
+            s3) collectors=iam,s3 ;;
+            cloudformation) collectors=iam,cloudformation ;;
+            lambda) collectors=iam,lambda ;;
+            ssm) collectors=iam,ssm,ec2 ;;
+            kms) collectors=iam,kms ;;
+            ec2) collectors=iam,ec2 ;;
+            eks) collectors=iam,eks ;;
+          esac
+          integration/output/awshound all \
+            --profile goawshound-primary \
+            --profile goawshound-secondary \
+            --collectors "$collectors" \
+            --regions us-east-1 \
+            --raw integration/output/raw \
+            --built integration/output/built.zip \
+            --metrics integration/output/metrics.json \
+            --error-log integration/output/collect-errors.json \
+            -o integration/output/graph.zip 2>&1 \
+            | tee integration/collect.log
+
+      - name: Validate awshound nodes and edges
+        id: validate
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation != 'cleanup-only' }}
+        timeout-minutes: 10
+        run: |
+          set -o pipefail
+          python3 integration/validate.py \
+            integration/output/graph.zip \
+            --raw integration/output/raw \
+            --error-log integration/output/collect-errors.json \
+            --schema "$SCHEMA_PATH" \
+            --project awshound \
+            --summary integration/output/integration-summary.md \
+            --suite "$TEST_SUITE" 2>&1 \
+            | tee integration/validate.log
+
+      - name: Refresh primary-account credentials for cleanup
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.operation == 'cleanup-only' || inputs.automatic_cleanup) }}
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.PRIMARY_OIDC_ROLE_ARN }}
+          role-session-name: goawshound-primary-cleanup-${{ github.run_id }}
+          aws-profile: goawshound-primary
+          overwrite-aws-profile: true
+          allowed-account-ids: ${{ env.PRIMARY_ACCOUNT_ID }}
+          output-env-credentials: false
+          unset-current-credentials: true
+
+      - name: Refresh secondary-account credentials for cleanup
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.operation == 'cleanup-only' || inputs.automatic_cleanup) }}
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.SECONDARY_OIDC_ROLE_ARN }}
+          role-session-name: goawshound-secondary-cleanup-${{ github.run_id }}
+          aws-profile: goawshound-secondary
+          overwrite-aws-profile: true
+          allowed-account-ids: ${{ env.SECONDARY_ACCOUNT_ID }}
+          output-env-credentials: false
+          unset-current-credentials: true
+
+      - name: Tear down integration resources
+        id: teardown
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.operation == 'cleanup-only' || inputs.automatic_cleanup) }}
+        timeout-minutes: 75
+        run: |
+          set -o pipefail
+          cleanup_failed=0
+          {
+            integration_kms_key_id="${GOAWSHOUND_INTEGRATION_KMS_KEY_ID:-}"
+            if [ -z "$integration_kms_key_id" ]; then
+              integration_kms_key_id="$(aws kms list-aliases \
+                --profile goawshound-primary \
+                --query "Aliases[?AliasName=='alias/goawshound-integration'].TargetKeyId | [0]" \
+                --output text 2>/dev/null || true)"
+            fi
+            if [ "$integration_kms_key_id" = "None" ]; then
+              integration_kms_key_id=""
+            fi
+
+            if aws s3api head-bucket --profile goawshound-primary --bucket "$BUCKET_NAME" 2>/dev/null; then
+              aws s3 rm "s3://${BUCKET_NAME}" --recursive --profile goawshound-primary || cleanup_failed=1
+            fi
+
+            if aws cloudformation describe-stacks --profile goawshound-primary --stack-name "$SERVICES_STACK" >/dev/null 2>&1; then
+              aws cloudformation delete-stack --profile goawshound-primary --stack-name "$SERVICES_STACK" || true
+              timeout 20m aws cloudformation wait stack-delete-complete --profile goawshound-primary --stack-name "$SERVICES_STACK" || \
+                echo "Service-stack deletion did not finish; checking billable resources directly"
+            fi
+
+            if aws eks describe-cluster --profile goawshound-primary --name goawshound-integration >/dev/null 2>&1; then
+              for attempt in $(seq 1 30); do
+                association_ids="$(aws eks list-pod-identity-associations \
+                  --profile goawshound-primary \
+                  --cluster-name goawshound-integration \
+                  --query 'associations[].associationId' \
+                  --output text 2>/dev/null || true)"
+                if [ -z "$association_ids" ]; then
+                  break
+                fi
+                for association_id in $association_ids; do
+                  aws eks delete-pod-identity-association \
+                    --profile goawshound-primary \
+                    --cluster-name goawshound-integration \
+                    --association-id "$association_id" || true
+                done
+                sleep 10
+              done
+              if [ -n "$association_ids" ]; then
+                echo "EKS Pod Identity association is still present after cleanup"
+                cleanup_failed=1
+              fi
+              if aws eks describe-nodegroup --profile goawshound-primary --cluster-name goawshound-integration --nodegroup-name goawshound-integration >/dev/null 2>&1; then
+                aws eks delete-nodegroup --profile goawshound-primary --cluster-name goawshound-integration --nodegroup-name goawshound-integration || true
+                timeout 25m aws eks wait nodegroup-deleted --profile goawshound-primary --cluster-name goawshound-integration --nodegroup-name goawshound-integration || true
+              fi
+              aws eks delete-cluster --profile goawshound-primary --name goawshound-integration || true
+              timeout 25m aws eks wait cluster-deleted --profile goawshound-primary --name goawshound-integration || true
+              if aws eks describe-cluster --profile goawshound-primary --name goawshound-integration >/dev/null 2>&1; then
+                echo "EKS fixture is still present after cleanup"
+                cleanup_failed=1
+              fi
+            fi
+            active_instance_ids="$(aws ec2 describe-instances \
+              --profile goawshound-primary \
+              --filters Name=tag:managed-by,Values=goawshound-integration-tests Name=instance-state-name,Values=pending,running,stopping,stopped \
+              --query 'Reservations[].Instances[].InstanceId' \
+              --output text 2>/dev/null || true)"
+            if [ -n "$active_instance_ids" ]; then
+              aws ec2 terminate-instances --profile goawshound-primary --instance-ids $active_instance_ids || true
+              timeout 15m aws ec2 wait instance-terminated --profile goawshound-primary --instance-ids $active_instance_ids || true
+              active_instance_ids="$(aws ec2 describe-instances \
+                --profile goawshound-primary \
+                --filters Name=tag:managed-by,Values=goawshound-integration-tests Name=instance-state-name,Values=pending,running,stopping,stopped \
+                --query 'Reservations[].Instances[].InstanceId' \
+                --output text 2>/dev/null || true)"
+              if [ -n "$active_instance_ids" ]; then
+                echo "EC2 fixture is still active after cleanup: $active_instance_ids"
+                cleanup_failed=1
+              fi
+            fi
+
+            available_volume_ids="$(aws ec2 describe-volumes \
+              --profile goawshound-primary \
+              --filters Name=tag:managed-by,Values=goawshound-integration-tests Name=status,Values=available \
+              --query 'Volumes[].VolumeId' \
+              --output text 2>/dev/null || true)"
+            for volume_id in $available_volume_ids; do
+              aws ec2 delete-volume --profile goawshound-primary --volume-id "$volume_id" || true
+            done
+            remaining_volume_ids="$(aws ec2 describe-volumes \
+              --profile goawshound-primary \
+              --filters Name=tag:managed-by,Values=goawshound-integration-tests Name=status,Values=available,in-use \
+              --query 'Volumes[].VolumeId' \
+              --output text 2>/dev/null || true)"
+            if [ -n "$remaining_volume_ids" ]; then
+              echo "EC2 fixture volumes are still present after cleanup: $remaining_volume_ids"
+              cleanup_failed=1
+            fi
+
+            if [ -n "$integration_kms_key_id" ]; then
+              aws kms delete-alias \
+                --profile goawshound-primary \
+                --alias-name alias/goawshound-integration 2>/dev/null || true
+              integration_kms_state="$(aws kms describe-key \
+                --profile goawshound-primary \
+                --key-id "$integration_kms_key_id" \
+                --query 'KeyMetadata.KeyState' \
+                --output text 2>/dev/null || true)"
+              case "$integration_kms_state" in
+                PendingDeletion|PendingReplicaDeletion|"") ;;
+                *)
+                  aws kms schedule-key-deletion \
+                    --profile goawshound-primary \
+                    --key-id "$integration_kms_key_id" \
+                    --pending-window-in-days 7 || true
+                  integration_kms_state="$(aws kms describe-key \
+                    --profile goawshound-primary \
+                    --key-id "$integration_kms_key_id" \
+                    --query 'KeyMetadata.KeyState' \
+                    --output text 2>/dev/null || true)"
+                  case "$integration_kms_state" in
+                    PendingDeletion|PendingReplicaDeletion|"") ;;
+                    *)
+                      echo "KMS fixture is not pending deletion after cleanup: $integration_kms_state"
+                      cleanup_failed=1
+                      ;;
+                  esac
+                  ;;
+              esac
+            fi
+
+            # Retry CloudFormation after direct cleanup so all remaining IAM and
+            # network fixtures are removed even when the first stack deletion failed.
+            if aws cloudformation describe-stacks --profile goawshound-primary --stack-name "$SERVICES_STACK" >/dev/null 2>&1; then
+              aws cloudformation delete-stack --profile goawshound-primary --stack-name "$SERVICES_STACK" || true
+              timeout 20m aws cloudformation wait stack-delete-complete --profile goawshound-primary --stack-name "$SERVICES_STACK" || cleanup_failed=1
+            fi
+
+            if aws cloudformation describe-stacks --profile goawshound-primary --stack-name "$PRIMARY_STACK" >/dev/null 2>&1; then
+              aws cloudformation delete-stack --profile goawshound-primary --stack-name "$PRIMARY_STACK" || cleanup_failed=1
+              timeout 20m aws cloudformation wait stack-delete-complete --profile goawshound-primary --stack-name "$PRIMARY_STACK" || cleanup_failed=1
+            fi
+
+            if aws cloudformation describe-stacks --profile goawshound-secondary --stack-name "$SECONDARY_STACK" >/dev/null 2>&1; then
+              aws cloudformation delete-stack --profile goawshound-secondary --stack-name "$SECONDARY_STACK" || cleanup_failed=1
+              timeout 20m aws cloudformation wait stack-delete-complete --profile goawshound-secondary --stack-name "$SECONDARY_STACK" || cleanup_failed=1
+            fi
+
+            exit "$cleanup_failed"
+          } 2>&1 | tee integration/teardown.log
+
+      - name: Publish integration summary
+        if: always()
+        env:
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          COLLECT_OUTCOME: ${{ steps.collect.outcome }}
+          VALIDATE_OUTCOME: ${{ steps.validate.outcome }}
+          TEARDOWN_OUTCOME: ${{ steps.teardown.outcome }}
+        run: |
+          total="$(grep '^TOTAL:' integration/validate.log 2>/dev/null | tail -1 || true)"
+          result="$(grep '^RESULT:' integration/validate.log 2>/dev/null | tail -1 || true)"
+          edge_kinds="$(grep '^EDGE KINDS:' integration/validate.log 2>/dev/null | tail -1 || true)"
+          failed="$(grep -c '^  \[FAIL\]' integration/validate.log 2>/dev/null || true)"
+
+          {
+            echo "## awshound AWS integration result"
+            echo
+            echo "| Phase | Outcome |"
+            echo "| --- | --- |"
+            echo "| Deploy and seed AWS | ${DEPLOY_OUTCOME:-not run} |"
+            echo "| awshound collect and graph build | ${COLLECT_OUTCOME:-not run} |"
+            echo "| Node and edge validation | ${VALIDATE_OUTCOME:-not run} |"
+            echo "| AWS teardown | ${TEARDOWN_OUTCOME:-not run} |"
+            echo
+            echo "${total:-TOTAL: validation report was not produced}"
+            echo
+            echo "${edge_kinds:-EDGE KINDS: coverage report was not produced}"
+            echo
+            echo "${result:-RESULT: validation did not complete}"
+            echo
+            echo "Failed assertions reported: ${failed:-0}"
+            echo
+            echo "[Open this workflow run](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+            if [ -f integration/output/integration-summary.md ]; then
+              echo
+              sed -n '1,$p' integration/output/integration-summary.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

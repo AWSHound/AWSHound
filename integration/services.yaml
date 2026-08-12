@@ -1,0 +1,440 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Billable awshound integration resources with bounded, verified teardown.
+
+Parameters:
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  TestSuite:
+    Type: String
+    Default: all
+    AllowedValues:
+      - all
+      - ssm
+      - kms
+      - ec2
+      - eks
+
+Conditions:
+  DeployKMS: !Or
+    - !Equals [!Ref TestSuite, all]
+    - !Equals [!Ref TestSuite, kms]
+  DeployInstance: !Or
+    - !Equals [!Ref TestSuite, all]
+    - !Equals [!Ref TestSuite, ssm]
+    - !Equals [!Ref TestSuite, ec2]
+  DeployEKS: !Or
+    - !Equals [!Ref TestSuite, all]
+    - !Equals [!Ref TestSuite, eks]
+  DeployCompute: !Or
+    - !Equals [!Ref TestSuite, all]
+    - !Equals [!Ref TestSuite, ssm]
+    - !Equals [!Ref TestSuite, ec2]
+    - !Equals [!Ref TestSuite, eks]
+
+Resources:
+  IntegrationKey:
+    Type: AWS::KMS::Key
+    Condition: DeployKMS
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Description: Ephemeral awshound integration KMS key.
+      EnableKeyRotation: false
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableIAMDelegation
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  IntegrationKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: DeployKMS
+    Properties:
+      AliasName: alias/goawshound-integration
+      TargetKeyId: !Ref IntegrationKey
+
+  IntegrationVPC:
+    Type: AWS::EC2::VPC
+    Condition: DeployCompute
+    Properties:
+      CidrBlock: 10.255.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: goawshound-integration
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: DeployCompute
+    Properties:
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: DeployCompute
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref IntegrationVPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: DeployCompute
+    Properties:
+      VpcId: !Ref IntegrationVPC
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    Condition: DeployCompute
+    DependsOn: GatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: DeployCompute
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.255.0.0/27
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref IntegrationVPC
+      Tags:
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: DeployCompute
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.255.0.32/27
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref IntegrationVPC
+      Tags:
+        - Key: kubernetes.io/role/elb
+          Value: "1"
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: DeployCompute
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: DeployCompute
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  ComputeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: DeployInstance
+    Properties:
+      GroupDescription: Egress-only security group for awshound integration compute.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref IntegrationVPC
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  ComputeRole:
+    Type: AWS::IAM::Role
+    Condition: DeployCompute
+    Properties:
+      RoleName: goawshound-integration-compute
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  ComputeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: DeployInstance
+    Properties:
+      InstanceProfileName: goawshound-integration-compute
+      Roles:
+        - !Ref ComputeRole
+
+  IntegrationInstance:
+    Type: AWS::EC2::Instance
+    Condition: DeployInstance
+    DependsOn: DefaultRoute
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 8
+            VolumeType: gp3
+      IamInstanceProfile: !Ref ComputeInstanceProfile
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      PropagateTagsToVolumeOnCreation: true
+      SecurityGroupIds:
+        - !Ref ComputeSecurityGroup
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: goawshound-integration-instance
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKS
+    Properties:
+      RoleName: goawshound-integration-eks-cluster
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  IntegrationCluster:
+    Type: AWS::EKS::Cluster
+    Condition: DeployEKS
+    Properties:
+      AccessConfig:
+        AuthenticationMode: API_AND_CONFIG_MAP
+        BootstrapClusterCreatorAdminPermissions: true
+      Name: goawshound-integration
+      ResourcesVpcConfig:
+        EndpointPrivateAccess: false
+        EndpointPublicAccess: true
+        SubnetIds:
+          - !Ref PublicSubnetA
+          - !Ref PublicSubnetB
+      RoleArn: !GetAtt ClusterRole.Arn
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  IntegrationNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Condition: DeployEKS
+    DependsOn: DefaultRoute
+    Properties:
+      AmiType: AL2023_x86_64_STANDARD
+      CapacityType: ON_DEMAND
+      ClusterName: !Ref IntegrationCluster
+      DiskSize: 20
+      InstanceTypes:
+        - t3.small
+      NodeRole: !GetAtt ComputeRole.Arn
+      NodegroupName: goawshound-integration
+      ScalingConfig:
+        DesiredSize: 1
+        MaxSize: 1
+        MinSize: 1
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+      Tags:
+        managed-by: goawshound-integration-tests
+
+  IntegrationPodIdentityAgent:
+    Type: AWS::EKS::Addon
+    Condition: DeployEKS
+    DependsOn: IntegrationNodeGroup
+    Properties:
+      AddonName: eks-pod-identity-agent
+      ClusterName: !Ref IntegrationCluster
+
+  ClusterOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: DeployEKS
+    Properties:
+      ClientIdList:
+        - sts.amazonaws.com
+      Url: !GetAtt IntegrationCluster.OpenIdConnectIssuerUrl
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  IRSARole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKS
+    Properties:
+      RoleName: goawshound-integration-irsa
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref ClusterOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  PodIdentityRole:
+    Type: AWS::IAM::Role
+    Condition: DeployEKS
+    Properties:
+      RoleName: goawshound-integration-pod-identity
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: pods.eks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+              - sts:TagSession
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  PodIdentityCompleteUser:
+    Type: AWS::IAM::User
+    Condition: DeployEKS
+    Properties:
+      UserName: goawshound-integration-pod-identity-complete
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-pod-identity-complete
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateAssociationAndSelfAdministerCluster
+                Effect: Allow
+                Action:
+                  - eks:CreatePodIdentityAssociation
+                  - eks:CreateAccessEntry
+                Resource: !GetAtt IntegrationCluster.Arn
+              - Sid: AssociateClusterAdmin
+                Effect: Allow
+                Action: eks:AssociateAccessPolicy
+                Resource: !Sub arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:access-entry/${IntegrationCluster}/*
+                Condition:
+                  StringEquals:
+                    eks:accessScope: cluster
+                    eks:policyArn: !Sub arn:${AWS::Partition}:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+              - Sid: PassPodIdentityRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt PodIdentityRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: pods.eks.amazonaws.com
+
+  PodIdentityNoPassRoleUser:
+    Type: AWS::IAM::User
+    Condition: DeployEKS
+    Properties:
+      UserName: goawshound-integration-pod-identity-no-pass-role
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-pod-identity-no-pass-role
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateAssociationAndSelfAdministerCluster
+                Effect: Allow
+                Action:
+                  - eks:CreatePodIdentityAssociation
+                  - eks:CreateAccessEntry
+                Resource: !GetAtt IntegrationCluster.Arn
+              - Sid: AssociateClusterAdmin
+                Effect: Allow
+                Action: eks:AssociateAccessPolicy
+                Resource: !Sub arn:${AWS::Partition}:eks:${AWS::Region}:${AWS::AccountId}:access-entry/${IntegrationCluster}/*
+
+  PodIdentityNoClusterAccessUser:
+    Type: AWS::IAM::User
+    Condition: DeployEKS
+    Properties:
+      UserName: goawshound-integration-pod-identity-no-cluster-access
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-pod-identity-no-cluster-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateAssociation
+                Effect: Allow
+                Action: eks:CreatePodIdentityAssociation
+                Resource: !GetAtt IntegrationCluster.Arn
+              - Sid: PassPodIdentityRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt PodIdentityRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: pods.eks.amazonaws.com
+
+  IntegrationPodIdentityAssociation:
+    Type: AWS::EKS::PodIdentityAssociation
+    Condition: DeployEKS
+    Properties:
+      ClusterName: !Ref IntegrationCluster
+      Namespace: goawshound-integration
+      RoleArn: !GetAtt PodIdentityRole.Arn
+      ServiceAccount: goawshound-integration
+
+Outputs:
+  ClusterName:
+    Condition: DeployEKS
+    Value: !Ref IntegrationCluster
+  InstanceId:
+    Condition: DeployInstance
+    Value: !Ref IntegrationInstance
+  KMSKeyId:
+    Condition: DeployKMS
+    Value: !Ref IntegrationKey
+  NodeGroupName:
+    Condition: DeployEKS
+    Value: !Ref IntegrationNodeGroup

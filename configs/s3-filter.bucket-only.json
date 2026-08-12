@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "default": "exclude",
+  "rules": [
+    {
+      "action": "include",
+      "target": "bucket",
+      "match": {"name": {"glob": "*"}}
+    }
+  ]
+}

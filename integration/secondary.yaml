@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: awshound integration-test resources in the secondary AWS account.
+
+Parameters:
+  PrimaryAccountId:
+    Type: String
+  PrimaryRoleName:
+    Type: String
+  BucketName:
+    Type: String
+  ExternalUserName:
+    Type: String
+
+Resources:
+  ExternalUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Ref ExternalUserName
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-cross-account
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AssumeFixtureRole
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${PrimaryAccountId}:role/${PrimaryRoleName}
+              - Sid: ReadFixtureObject
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/integration-fixture.txt
+              - Sid: InvokeFixtureFunction
+                Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${PrimaryAccountId}:function:goawshound-integration-function
+
+  DeniedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-denied
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  PrincipalTagAllowedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-principal-tag-allowed
+      # This is a persistent IAM role tag. The fixture never assumes this role
+      # and does not use STS TagSession or a session policy.
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+        - Key: Student
+          Value: student01
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: assume-principal-tag-target
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${PrimaryAccountId}:role/goawshound-integration-principal-tag-target
+
+  PrincipalTagDeniedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-principal-tag-denied
+      # This has the same identity-side permission as the positive control but
+      # no Student tag, isolating evaluation of the target trust condition.
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: assume-principal-tag-target
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${PrimaryAccountId}:role/goawshound-integration-principal-tag-target
+
+Outputs:
+  ExternalUserArn:
+    Value: !GetAtt ExternalUser.Arn
+  DeniedUserArn:
+    Value: !GetAtt DeniedUser.Arn

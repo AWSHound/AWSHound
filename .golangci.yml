@@ -1,0 +1,13 @@
+version: "2"
+run:
+  tests: false
+linters:
+  default: none
+  enable:
+    - funlen
+  settings:
+    funlen:
+      # Team standard: functions no more than 150 lines (code lines, comments excluded).
+      lines: 150
+      statements: -1
+      ignore-comments: true
