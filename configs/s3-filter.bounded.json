@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "default": "include",
+  "max_objects_per_bucket": 100,
+  "rules": []
+}

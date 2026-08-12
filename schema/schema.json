@@ -1,0 +1,964 @@
+{
+  "schema": {
+    "name": "AWSHound",
+    "display_name": "AWS (AWSHound)",
+    "version": "v1.0.0",
+    "namespace": "AWS"
+  },
+  "node_kinds": [
+    {
+      "name": "AWS_Organization",
+      "display_name": "AWS Organization",
+      "description": "An AWS Organization—top-level container for accounts, SCPs, and RCPs",
+      "is_display_kind": true,
+      "icon": "building",
+      "color": "#FF9900"
+    },
+    {
+      "name": "AWS_Account",
+      "display_name": "AWS Account",
+      "description": "An AWS account within an organization or standalone",
+      "is_display_kind": true,
+      "icon": "cloud",
+      "color": "#232F3E"
+    },
+    {
+      "name": "AWS_User",
+      "display_name": "AWS IAM User",
+      "description": "An IAM user principal with long-term credentials",
+      "is_display_kind": true,
+      "icon": "user",
+      "color": "#4CAF50"
+    },
+    {
+      "name": "AWS_Group",
+      "display_name": "AWS IAM Group",
+      "description": "An IAM group that aggregates users for shared policy attachment",
+      "is_display_kind": true,
+      "icon": "user-group",
+      "color": "#2196F3"
+    },
+    {
+      "name": "AWS_Role",
+      "display_name": "AWS IAM Role",
+      "description": "An IAM role that can be assumed by trusted principals via STS",
+      "is_display_kind": true,
+      "icon": "user-tie",
+      "color": "#E91E63"
+    },
+    {
+      "name": "AWS_Policy",
+      "display_name": "AWS IAM Managed Policy",
+      "description": "A standalone (AWS-managed or customer-managed) IAM policy that can be attached to principals",
+      "is_display_kind": true,
+      "icon": "file-shield",
+      "color": "#9C27B0"
+    },
+    {
+      "name": "AWS_ServiceControlPolicy",
+      "display_name": "AWS Service Control Policy",
+      "description": "An Organizations SCP that restricts permissions across member accounts",
+      "is_display_kind": true,
+      "icon": "shield",
+      "color": "#FF5722"
+    },
+    {
+      "name": "AWS_ResourceControlPolicy",
+      "display_name": "AWS Resource Control Policy",
+      "description": "An Organizations RCP that restricts resource-level permissions across member accounts",
+      "is_display_kind": true,
+      "icon": "shield-halved",
+      "color": "#FF7043"
+    },
+    {
+      "name": "AWS_S3Bucket",
+      "display_name": "AWS S3 Bucket",
+      "description": "An Amazon S3 bucket with bucket policy, ACL, and public access settings",
+      "is_display_kind": true,
+      "icon": "bucket",
+      "color": "#569A31"
+    },
+    {
+      "name": "AWS_S3Object",
+      "display_name": "AWS S3 Object",
+      "description": "An object stored within an S3 bucket",
+      "is_display_kind": true,
+      "icon": "file",
+      "color": "#7CB342"
+    },
+    {
+      "name": "AWS_CloudFormationStack",
+      "display_name": "AWS CloudFormation Stack",
+      "description": "An AWS CloudFormation stack that provisions and manages a collection of AWS resources",
+      "is_display_kind": true,
+      "icon": "layer-group",
+      "color": "#E7157B"
+    },
+    {
+      "name": "AWS_CloudFormationStackSet",
+      "display_name": "AWS CloudFormation StackSet",
+      "description": "An AWS CloudFormation StackSet that deploys stacks across multiple accounts and regions via an administration/execution role pair",
+      "is_display_kind": true,
+      "icon": "layer-group",
+      "color": "#E7157B"
+    },
+    {
+      "name": "AWS_SAMLProvider",
+      "display_name": "AWS SAML Provider",
+      "description": "A SAML 2.0 identity provider configured for federated access to AWS",
+      "is_display_kind": true,
+      "icon": "id-badge",
+      "color": "#3F51B5"
+    },
+    {
+      "name": "AWS_OIDCProvider",
+      "display_name": "AWS OIDC Provider",
+      "description": "An OpenID Connect identity provider for web identity federation",
+      "is_display_kind": true,
+      "icon": "arrows-left-right",
+      "color": "#5C6BC0"
+    },
+    {
+      "name": "AWS_EC2Instance",
+      "display_name": "AWS EC2 Instance",
+      "description": "An Amazon EC2 virtual machine instance",
+      "is_display_kind": true,
+      "icon": "server",
+      "color": "#F48120"
+    },
+    {
+      "name": "AWS_EKSCluster",
+      "display_name": "AWS EKS Cluster",
+      "description": "An AWS EKS Cluster.",
+      "is_display_kind": true,
+      "icon": "circle-nodes",
+      "color": "#F68D11"
+    },
+    {
+      "name": "AWS_EKSNodeGroup",
+      "display_name": "AWS EKS Node Group",
+      "description": "An AWS EKS Node Group.",
+      "is_display_kind": true,
+      "icon": "cubes",
+      "color": "#F68D11"
+    },
+    {
+      "name": "AWS_KMSKey",
+      "display_name": "AWS KMS Key",
+      "description": "An AWS KMS customer master key used for encryption, decryption, and key management",
+      "is_display_kind": true,
+      "icon": "lock",
+      "color": "#DD3522"
+    },
+    {
+      "name": "AWS_LambdaFunction",
+      "display_name": "AWS Lambda Function",
+      "description": "An AWS Lambda function with code, configuration, execution role, and resource policy",
+      "is_display_kind": true,
+      "icon": "bolt",
+      "color": "#F58536"
+    },
+    {
+      "name": "AWS_SSMParameter",
+      "display_name": "AWS SSM Parameter",
+      "description": "An AWS Systems Manager Parameter Store parameter containing configuration data or secrets",
+      "is_display_kind": true,
+      "icon": "database",
+      "color": "#D45B07"
+    }
+  ],
+  "relationship_kinds": [
+    {
+      "name": "AWS_Contains",
+      "description": "Structural containment (organization contains accounts, account contains principals, buckets, keys, etc.)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_MemberOf",
+      "description": "IAM user is a member of an IAM group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_HasPolicy",
+      "description": "Principal (user, group, or role) has a managed policy attached",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_HasMember",
+      "description": "IAM group has a user as a member",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_HasSCP",
+      "description": "Organization has a service control policy",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_HasRCP",
+      "description": "Organization has a resource control policy",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_AttachedTo",
+      "description": "Managed policy is attached to a principal",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_Trusts",
+      "description": "Role trusts a principal via its trust policy (role -> trusted entity)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_TrustedBy",
+      "description": "Principal is trusted by a role (inverse of AWS_Trusts)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_TrustsSAMLProvider",
+      "description": "Role trusts a SAML identity provider for federated access",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_TrustsOIDCProvider",
+      "description": "Role trusts an OIDC identity provider for web identity federation",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_RunsAs",
+      "description": "Compute resource (EC2 instance, Lambda function, CloudFormation stack) executes as an IAM role",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanSetDefaultPolicyVersion",
+      "description": "Principal can call iam:SetDefaultPolicyVersion to activate a different policy version",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreatePolicyVersion",
+      "description": "Principal can call iam:CreatePolicyVersion on a customer-managed policy to publish a new (default) policy version, overwriting its document (pathfinding.cloud IAM-001)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAttachUserPolicy",
+      "description": "Principal can call iam:AttachUserPolicy to attach a managed policy to a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAttachGroupPolicy",
+      "description": "Principal can call iam:AttachGroupPolicy to attach a managed policy to a group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAttachRolePolicy",
+      "description": "Principal can call iam:AttachRolePolicy to attach a managed policy to a role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDetachUserPolicy",
+      "description": "Principal can call iam:DetachUserPolicy to detach a managed policy from a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDetachGroupPolicy",
+      "description": "Principal can call iam:DetachGroupPolicy to detach a managed policy from a group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDetachRolePolicy",
+      "description": "Principal can call iam:DetachRolePolicy to detach a managed policy from a role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutUserPolicy",
+      "description": "Principal can call iam:PutUserPolicy to create or update an inline policy on a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutGroupPolicy",
+      "description": "Principal can call iam:PutGroupPolicy to create or update an inline policy on a group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutRolePolicy",
+      "description": "Principal can call iam:PutRolePolicy to create or update an inline policy on a role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteUserPolicy",
+      "description": "Principal can call iam:DeleteUserPolicy to delete an inline policy from a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteGroupPolicy",
+      "description": "Principal can call iam:DeleteGroupPolicy to delete an inline policy from a group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteRolePolicy",
+      "description": "Principal can call iam:DeleteRolePolicy to delete an inline policy from a role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateSelfPolicy",
+      "description": "Principal can rewrite a permission container it is already subject to — its own user/role inline or attached policy, or a customer-managed policy attached to it (directly or via a group) — granting itself admin with no assume step. Targets the account; gated by the principal having no capping permissions boundary. The methods property records the usable self-modification techniques.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanUpdateOtherPolicy",
+      "description": "Principal can both control another principal (CanAssumeRole for a role; CanCreateAccessKey/CanCreateLoginProfile/CanUpdateLoginProfile for a user) and re-permission it (put/attach policy, or CreatePolicyVersion on a policy attached to it), letting it grant the dest admin and act as it. Targets the account; gated by the dest having no capping permissions boundary. The methods property records, per dest principal, the control and re-permission techniques.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanUpdateAssumeRolePolicyAndAssume",
+      "description": "Principal can modify a role's trust policy and has sts:AssumeRole, enabling them to rewrite the trust to include themselves and then assume the role",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateAndAssumeAdminRole",
+      "description": "Principal can create a new IAM role (iam:CreateRole), attach an admin policy to it (iam:AttachRolePolicy/PutRolePolicy on role/*), and assume it (sts:AssumeRole) — a self-trusting admin role they assume directly, gaining account admin",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateAndPassAdminRole",
+      "description": "Principal can create a new IAM role, attach an admin policy to it, and pass it to one or more AWS services (EC2/Lambda/CloudFormation/EKS) to execute as it — account takeover. The services/methods properties record which services are usable",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateAndAccessAdminUser",
+      "description": "Principal can create a new IAM user (iam:CreateUser), grant it admin (iam:AttachUserPolicy/PutUserPolicy on user/*), and mint usable credentials for it (iam:CreateAccessKey/CreateLoginProfile on user/*) — a fresh admin user it controls, gaining account admin. User-side mirror of AWS_CanCreateAndAssumeAdminRole; the methods property records the grant + credential techniques",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanPutUserPermissionsBoundary",
+      "description": "Principal can call iam:PutUserPermissionsBoundary to set a permissions boundary on a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutRolePermissionsBoundary",
+      "description": "Principal can call iam:PutRolePermissionsBoundary to set a permissions boundary on a role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteUserPermissionsBoundary",
+      "description": "Principal can call iam:DeleteUserPermissionsBoundary to remove a permissions boundary from a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteRolePermissionsBoundary",
+      "description": "Principal can call iam:DeleteRolePermissionsBoundary to remove a permissions boundary from a role, widening its effective permissions. Non-traversable: deleting a boundary does not by itself grant control of the role.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAddUserToGroup",
+      "description": "Principal can call iam:AddUserToGroup to add a user to an IAM group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanRemoveUserFromGroup",
+      "description": "Principal can call iam:RemoveUserFromGroup to remove a user from an IAM group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateGroup",
+      "description": "Principal can call iam:CreateGroup to create a new IAM group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteGroup",
+      "description": "Principal can call iam:DeleteGroup to delete an IAM group",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateUser",
+      "description": "Principal can call iam:CreateUser to create a new IAM user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteUser",
+      "description": "Principal can call iam:DeleteUser to delete an IAM user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateAccessKey",
+      "description": "Principal can call iam:CreateAccessKey to create a new access key for a user",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanDeleteAccessKey",
+      "description": "Principal can call iam:DeleteAccessKey to delete an access key from a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateAccessKey",
+      "description": "Principal can call iam:UpdateAccessKey to activate or deactivate a user's access key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateLoginProfile",
+      "description": "Principal can call iam:CreateLoginProfile to create a console password for a user",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanUpdateLoginProfile",
+      "description": "Principal can call iam:UpdateLoginProfile to change a user's console password",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanDeleteLoginProfile",
+      "description": "Principal can call iam:DeleteLoginProfile to remove a user's console password",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateServiceSpecificCredential",
+      "description": "Principal can call iam:CreateServiceSpecificCredential to create a credential for a specific AWS service",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanResetServiceSpecificCredential",
+      "description": "Principal can call iam:ResetServiceSpecificCredential to reset a service-specific credential",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteServiceSpecificCredential",
+      "description": "Principal can call iam:DeleteServiceSpecificCredential to delete a service-specific credential",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUploadSSHPublicKey",
+      "description": "Principal can call iam:UploadSSHPublicKey to upload an SSH public key for a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteSSHPublicKey",
+      "description": "Principal can call iam:DeleteSSHPublicKey to delete a user's SSH public key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateSSHPublicKey",
+      "description": "Principal can call iam:UpdateSSHPublicKey to activate or deactivate a user's SSH public key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeactivateMFADevice",
+      "description": "Principal can call iam:DeactivateMFADevice to deactivate an MFA device for a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteVirtualMFADevice",
+      "description": "Principal can call iam:DeleteVirtualMFADevice to delete a virtual MFA device",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanResyncMFADevice",
+      "description": "Principal can call iam:ResyncMFADevice to resynchronize an MFA device",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanEnableMFADevice",
+      "description": "Principal can call iam:EnableMFADevice to enable an MFA device for a user",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateVirtualMFADevice",
+      "description": "Principal can call iam:CreateVirtualMFADevice to create a new virtual MFA device",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateAssumeRolePolicy",
+      "description": "Principal can call iam:UpdateAssumeRolePolicy to modify a role's trust policy",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateRole",
+      "description": "Principal can call iam:CreateRole to create a new IAM role with a custom trust policy",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteRole",
+      "description": "Principal can call iam:DeleteRole to delete an IAM role",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_HasExternalRoleTrust",
+      "description": "Role has a trust policy entry for a principal in a different AWS account (cross-account trust)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAssumeRole",
+      "description": "Principal can call sts:AssumeRole to assume a role (dual authorization: IAM policy + trust policy)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateOIDCProviderAndAssumeRole",
+      "description": "Principal can create a malicious OIDC identity provider and rewrite a role's trust policy to trust it, then assume the role via sts:AssumeRoleWithWebIdentity using tokens from the attacker-controlled provider",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateSAMLProviderAndAssumeRole",
+      "description": "Principal can create a malicious SAML identity provider and rewrite a role's trust policy to trust it, then assume the role via sts:AssumeRoleWithSAML using assertions from the attacker-controlled provider",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAssumeRoleWithSAML",
+      "description": "Principal can call sts:AssumeRoleWithSAML to assume a role via SAML federation",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAssumeRoleWithWebIdentity",
+      "description": "Principal can call sts:AssumeRoleWithWebIdentity to assume a role via OIDC federation",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanGetFederationToken",
+      "description": "Principal can call sts:GetFederationToken to obtain temporary federated credentials",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetSessionToken",
+      "description": "Principal can call sts:GetSessionToken to obtain temporary session credentials",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateSAMLProvider",
+      "description": "Principal can call iam:UpdateSAMLProvider to update the metadata of a SAML provider",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateSAMLProvider",
+      "description": "Principal can call iam:CreateSAMLProvider to create a new SAML identity provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteSAMLProvider",
+      "description": "Principal can call iam:DeleteSAMLProvider to delete a SAML identity provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateOIDCProviderThumbprint",
+      "description": "Principal can call iam:UpdateOpenIDConnectProviderThumbprint to update an OIDC provider's thumbprint",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAddClientIDToOIDCProvider",
+      "description": "Principal can call iam:AddClientIDToOpenIDConnectProvider to add a client ID to an OIDC provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanRemoveClientIDFromOIDCProvider",
+      "description": "Principal can call iam:RemoveClientIDFromOpenIDConnectProvider to remove a client ID from an OIDC provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateOIDCProvider",
+      "description": "Principal can call iam:CreateOpenIDConnectProvider to create a new OIDC identity provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteOIDCProvider",
+      "description": "Principal can call iam:DeleteOpenIDConnectProvider to delete an OIDC identity provider",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAttachRolePolicyWildcard",
+      "description": "Can Attach Role Policy Wildcard relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutRolePolicyWildcard",
+      "description": "Can Put Role Policy Wildcard relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPassRoleToService",
+      "description": "Principal can pass this IAM role to one or more AWS services (EC2/Lambda/CloudFormation/SSM/EKS) and assume it. The services property lists services the role already trusts (a direct pass); services_via_trust_rewrite lists services reachable only after rewriting the role's trust policy via iam:UpdateAssumeRolePolicy. The methods property records the per-service technique.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanDeleteBucket",
+      "description": "Principal can call s3:DeleteBucket to delete an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteBucketPolicy",
+      "description": "Principal can call s3:DeleteBucketPolicy to remove the bucket policy from an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteObject",
+      "description": "Principal can call s3:DeleteObject to delete objects from an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetBucketACL",
+      "description": "Principal can call s3:GetBucketAcl to read the ACL of an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetBucketPolicy",
+      "description": "Principal can call s3:GetBucketPolicy to read the bucket policy of an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetObject",
+      "description": "Principal can call s3:GetObject to read objects from an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetObjectACL",
+      "description": "Principal can call s3:GetObjectAcl to read the ACL of an S3 object",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanListAllMyBuckets",
+      "description": "Principal can call s3:ListAllMyBuckets to list all S3 buckets in the account",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanListBucket",
+      "description": "Principal can call s3:ListBucket to list objects within an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutAccountPublicAccessBlock",
+      "description": "Principal can call s3:PutAccountPublicAccessBlock to modify account-level S3 public access settings",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutBucketACL",
+      "description": "Principal can call s3:PutBucketAcl to modify the ACL of an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutBucketOwnershipControls",
+      "description": "Principal can call s3:PutBucketOwnershipControls to modify bucket ownership controls",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutBucketPolicy",
+      "description": "Principal can call s3:PutBucketPolicy to set the bucket policy on an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutBucketPublicAccessBlock",
+      "description": "Principal can call s3:PutPublicAccessBlock to modify bucket-level public access settings",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutObject",
+      "description": "Principal can call s3:PutObject to write objects to an S3 bucket",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutObjectACL",
+      "description": "Principal can call s3:PutObjectAcl to modify the ACL of an S3 object",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3ObjectRead",
+      "description": "Principal has all S3 object read permissions (GetObject + GetObjectAcl)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3ObjectWrite",
+      "description": "Principal has all S3 object read and write permissions (Read + PutObject)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3ObjectAll",
+      "description": "Principal has all S3 object permissions (Write + DeleteObject + PutObjectAcl)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3BucketRead",
+      "description": "Principal has all S3 bucket read permissions (ListBucket + GetBucketACL + GetBucketPolicy)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3BucketWrite",
+      "description": "Principal has all S3 bucket read and write permissions (Read + PutObject)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_S3BucketAll",
+      "description": "Principal has all S3 bucket permissions (Write + control plane + delete)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateKMSGrant",
+      "description": "Principal can call kms:CreateGrant to create a grant on a KMS key, delegating usage permissions",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDecryptKMSKey",
+      "description": "Principal can call kms:Decrypt to decrypt data using a KMS key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDisableKMSKey",
+      "description": "Principal can call kms:DisableKey to disable a KMS key, preventing its use",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanEncryptKMSKey",
+      "description": "Principal can call kms:Encrypt to encrypt data using a KMS key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGenerateKMSDataKey",
+      "description": "Principal can call kms:GenerateDataKey to generate a data encryption key from a KMS key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanListKMSKeys",
+      "description": "Principal can call kms:ListKeys to enumerate KMS keys in the account",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanModifyKMSKeyPolicy",
+      "description": "Principal can call kms:PutKeyPolicy to modify the key policy of a KMS key",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanScheduleKMSKeyDeletion",
+      "description": "Principal can call kms:ScheduleKeyDeletion to schedule a KMS key for deletion",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanSelfGrantKMSOps",
+      "description": "Principal can call kms:CreateGrant with self-grant to escalate their own KMS permissions",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_KMSKeyRead",
+      "description": "Principal has all KMS key cryptographic operation permissions (Decrypt + Encrypt + GenerateDataKey)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_KMSKeyAll",
+      "description": "Principal has all KMS key permissions (crypto + grants + policy + disable + delete)",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateSSMAssociation",
+      "description": "Can Create SSM Association relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateSSMDocument",
+      "description": "Can Create SSM Document relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanStartSSMAutomationExecution",
+      "description": "Can Start SSM Automation Execution relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetParameter",
+      "description": "Principal can call ssm:GetParameter to read an SSM Parameter Store value",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanPutParameter",
+      "description": "Principal can call ssm:PutParameter to create or update an SSM Parameter Store value",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteParameter",
+      "description": "Principal can call ssm:DeleteParameter to delete an SSM Parameter Store parameter",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanAddLambdaPermission",
+      "description": "Principal can call lambda:AddPermission to grant another account or service invoke access to a Lambda function",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateLambdaEventSource",
+      "description": "Principal can call lambda:CreateEventSourceMapping to create an event source mapping for a Lambda function",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanDeleteLambdaFunction",
+      "description": "Principal can call lambda:DeleteFunction to delete a Lambda function",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanInvokeLambdaFunction",
+      "description": "Principal can call lambda:InvokeFunction to execute a Lambda function",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanRemoveLambdaPermission",
+      "description": "Principal can call lambda:RemovePermission to revoke a resource-based policy statement from a Lambda function",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateLambdaCode",
+      "description": "Principal can call lambda:UpdateFunctionCode to replace the code of a Lambda function",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanUpdateLambdaConfiguration",
+      "description": "Principal can call lambda:UpdateFunctionConfiguration to modify a Lambda function's runtime settings (environment, role, layers, etc.)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanUpdateLambdaURLConfig",
+      "description": "Principal can call lambda:UpdateFunctionUrlConfig to modify a Lambda function's URL configuration",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateLambdaFunction",
+      "description": "Can Create Lambda Function relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_LambdaFunctionWrite",
+      "description": "Principal has Lambda function invoke + code/config modification permissions (InvokeFunction + UpdateFunctionCode + UpdateFunctionConfiguration)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_LambdaFunctionAll",
+      "description": "Principal has all Lambda function permissions (invoke + modify + control plane + delete)",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanModifyEC2InstanceAttribute",
+      "description": "Principal can call ec2:ModifyInstanceAttribute to modify EC2 instance attributes such as user data for code execution",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAssociateIAMInstanceProfile",
+      "description": "Principal can call ec2:AssociateIamInstanceProfile to attach an IAM instance profile to an EC2 instance",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanReplaceIAMInstanceProfileAssociation",
+      "description": "Principal can call ec2:ReplaceIamInstanceProfileAssociation to swap the IAM instance profile on an EC2 instance",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanGetPasswordData",
+      "description": "Principal can call ec2:GetPasswordData to retrieve the encrypted Windows administrator password for an EC2 instance",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_EC2CanVolumeSwap",
+      "description": "Principal can perform a volume swap attack (StopInstances + DetachVolume + AttachVolume + StartInstances) to gain code execution on an EC2 instance",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanDisassociateIAMInstanceProfile",
+      "description": "Principal can call ec2:DisassociateIamInstanceProfile to remove an IAM instance profile from an EC2 instance",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanTerminateInstances",
+      "description": "Principal can call ec2:TerminateInstances to terminate EC2 instances",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateSnapshot",
+      "description": "Principal can call ec2:CreateSnapshot to create snapshots of volumes attached to EC2 instances",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateImage",
+      "description": "Principal can call ec2:CreateImage to create an AMI from an EC2 instance",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanRunInstances",
+      "description": "Can Run Instances relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanRequestSpotInstances",
+      "description": "Can Request Spot Instances relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_SSMCanSendCommand",
+      "description": "Principal can call ssm:SendCommand to execute commands on SSM-managed EC2 instances",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_SSMCanStartSession",
+      "description": "Principal can call ssm:StartSession to open an interactive shell on SSM-managed EC2 instances",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateCloudFormationStack",
+      "description": "Can Create Cloud Formation Stack relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateCloudFormationStackSet",
+      "description": "Can Create Cloud Formation Stack Set relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateCloudFormationStackSet",
+      "description": "Can Update Cloud Formation Stack Set relationship (resource-scoped to a collected StackSet).",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanUpdateCloudFormationStack",
+      "description": "Principal can call cloudformation:UpdateStack to rewrite a stack's template and have CloudFormation execute it as the stack's execution role; the compromise continues to that role via AWS_RunsAs",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanExecuteCloudFormationChangeSet",
+      "description": "Principal can call both cloudformation:CreateChangeSet and cloudformation:ExecuteChangeSet to apply a rewritten template to an existing stack, which CloudFormation executes as the stack's execution role (no iam:PassRole needed); the compromise continues to that role via AWS_RunsAs",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_ClusterHasNodeGroup",
+      "description": "Cluster Has Node Group relationship.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_NodeGroupHasRole",
+      "description": "Node Group Has Role relationship.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAssumeRoleViaIRSA",
+      "description": "Can Assume Role Via IRSA relationship.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanAssumeRoleViaPodIdentity",
+      "description": "Can Assume Role Via Pod Identity relationship.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateAndAssociateEKSAccessEntry",
+      "description": "Can Create And Associate EKS Access Entry relationship.",
+      "is_traversable": true
+    },
+    {
+      "name": "AWS_CanCreateEKSNodegroup",
+      "description": "Can Create EKS Nodegroup relationship.",
+      "is_traversable": false
+    },
+    {
+      "name": "AWS_CanCreateEKSPodIdentityAssociation",
+      "description": "Principal can establish or use cluster-admin access, create a Pod Identity association, and pass the target role to pods.eks.amazonaws.com.",
+      "is_traversable": true
+    }
+  ],
+  "environments": [
+    {
+      "environment_kind": "AWS_Account",
+      "source_kind": "AWS",
+      "principal_kinds": [
+        "AWS_User",
+        "AWS_Group",
+        "AWS_Role"
+      ]
+    }
+  ],
+  "relationship_findings": []
+}

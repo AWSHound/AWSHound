@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "default": "exclude",
+  "max_objects_per_bucket": 100,
+  "rules": [
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "cloudtrail"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "logging"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "access-logs"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "flowlogs"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "config-bucket"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"contains": "elasticmapreduce"}}
+    },
+    {
+      "action": "exclude",
+      "target": "bucket",
+      "match": {"name": {"glob": "aws-athena-query-results-*"}}
+    }
+  ]
+}

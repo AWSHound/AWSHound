@@ -1,0 +1,8 @@
+/awshound
+
+# Generated collection/build artifacts
+/built.json
+/graph.json
+/integration/output/
+/integration/*.log
+/testdata/live-validate-run*.log

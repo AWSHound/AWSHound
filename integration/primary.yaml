@@ -1,0 +1,714 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: awshound integration-test resources in the primary AWS account.
+
+Parameters:
+  SecondaryAccountId:
+    Type: String
+  ExternalUserName:
+    Type: String
+  PrimaryRoleName:
+    Type: String
+  BucketName:
+    Type: String
+
+Resources:
+  ReaderUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-reader
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-read-fixture
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Deliberately omit both GetBucketAcl and GetObjectAcl. Without the
+              # ACL constituents the S3 meta edges cannot fire, so every other
+              # primitive below survives into the final graph and can be checked.
+              - Sid: PrimitiveS3Edges
+                Effect: Allow
+                Action:
+                  - s3:DeleteBucket
+                  - s3:DeleteBucketPolicy
+                  - s3:DeleteObject
+                  - s3:GetBucketPolicy
+                  - s3:GetObject
+                  - s3:ListAllMyBuckets
+                  - s3:ListBucket
+                  - s3:PutAccountPublicAccessBlock
+                  - s3:PutBucketAcl
+                  - s3:PutBucketOwnershipControls
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                Resource: "*"
+
+  EdgeOperator:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-edge-operator
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      # This principal has no access key or login profile. Broad declarations are
+      # only graph inputs and are never exercised by the workflow.
+      Policies:
+        - PolicyName: goawshound-integration-edge-declarations
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: IAMLifecycleAndRepermissionEdges
+                Effect: Allow
+                Action: iam:*
+                Resource: "*"
+              - Sid: RoleAndFederationEdges
+                Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                  - sts:GetFederationToken
+                  - sts:GetSessionToken
+                Resource: "*"
+              - Sid: CloudFormationEdges
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:CreateStack
+                  - cloudformation:CreateStackSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:UpdateStack
+                  - cloudformation:UpdateStackSet
+                Resource: "*"
+              - Sid: SSMAccountEdges
+                Effect: Allow
+                Action:
+                  - ssm:CreateAssociation
+                  - ssm:CreateDocument
+                  - ssm:StartAutomationExecution
+                Resource: "*"
+              - Sid: SSMParameterEdges
+                Effect: Allow
+                Action:
+                  - ssm:DeleteParameter
+                  - ssm:GetParameter
+                  - ssm:PutParameter
+                Resource: "*"
+              - Sid: SSMManagedInstanceEdges
+                Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                Resource: "*"
+              - Sid: LambdaMetaAndCreateEdges
+                Effect: Allow
+                Action: lambda:*
+                Resource: "*"
+              - Sid: BillableInfrastructureEdges
+                Effect: Allow
+                Action:
+                  - ec2:*
+                  - eks:*
+                  - kms:*
+                Resource: "*"
+
+  TargetUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-target
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  TargetGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: goawshound-integration-group
+
+  TargetGroupMembership:
+    Type: AWS::IAM::UserToGroupAddition
+    Properties:
+      GroupName: !Ref TargetGroup
+      Users:
+        - !Ref TargetUser
+
+  FixtureManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: goawshound-integration-managed-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: HarmlessFixturePermission
+            Effect: Allow
+            Action: s3:GetBucketLocation
+            Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}
+      Groups:
+        - !Ref TargetGroup
+      Users:
+        - !Ref TargetUser
+
+  SAMLProvider:
+    Type: AWS::IAM::SAMLProvider
+    Properties:
+      Name: goawshound-integration-saml
+      SamlMetadataDocument: '<md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="https://goawshound-integration.invalid/saml"><md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"><md:KeyDescriptor use="signing"><ds:KeyInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:X509Data><ds:X509Certificate>MIICzjCCAbYCCQCm5XY26FATJjANBgkqhkiG9w0BAQsFADApMScwJQYDVQQDDB5nb2F3c2hvdW5kLWludGVncmF0aW9uLmludmFsaWQwHhcNMjYwODAxMTgwNTA2WhcNMzYwNzI5MTgwNTA2WjApMScwJQYDVQQDDB5nb2F3c2hvdW5kLWludGVncmF0aW9uLmludmFsaWQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDb/lzqJihMh2t2s5AWzjdRopV2G12zYZEdka1Z17NihSeAGUmit7eGr7mGpK8nhzLANtExjFWbGP1wNSUadynkZDqAL0p2Z5QrWG62EYIAaO9HRtSF7nNNZ2qoLOUdXEsLuSOboS2CZ43x795SIFQs99Lwp88DvZLbGoWes3XMzYpw2SgYMYXm3vyapsuSqVid6hNmDxx5e0znXsNWxC9bPVjyhio/U77GQaAcgOrLW9a9/5FVTQrwZ7SP02G9p6iOs76TiMUnIvc0lZAcTFMEWlw7Lg3Rvc417gFzDqggP1hNiTFEwDpDIuFZc5Tod/GG4ow2Y0NLRV23n2xEXYLzAgMBAAEwDQYJKoZIhvcNAQELBQADggEBADDUgpi16vUIpnbbLqTmOaZeyHB26yQ3z405rpOn3yMSwMVMleoIpmu88edaDQky3g30m6LlJR3r1wOuGW5i784qJR8yZgfWAUqcCDWkBWzU0KYtpFIItTIpD8kz7gCRuI/1hK2jHJ/eo/k+8I/NSfTcWcwa8/ae7r6DnmFHXFcAXYHxzlpnp66QQf4DHUUFvHZY1/t/qh+7EpM1kDo7CDgOGrl8WCqqikulRhHMusJJHF9uoK7c+s6SUtJgYtoP/QwkMEjdJxyPZYNx0QYDGcLud4ohT6D+JQcJxz5UbAn6JO+4S8VppeOMQ08lXiSsrg2rj/XOt3naVNajYtU4lxI=</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor><md:NameIDFormat>urn:oasis:names:tc:SAML:2.0:nameid-format:persistent</md:NameIDFormat><md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST" Location="https://goawshound-integration.invalid/saml/sso"/></md:IDPSSODescriptor></md:EntityDescriptor>'
+
+  TargetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-target
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ConditionalOperatorTrust
+            Effect: Allow
+            Principal:
+              AWS: !GetAtt EdgeOperator.Arn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: goawshound-integration
+          - Sid: CloudFormationServiceTrust
+            Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+          - Sid: LambdaServiceTrust
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+          - Sid: SAMLTrust
+            Effect: Allow
+            Principal:
+              Federated: !Ref SAMLProvider
+            Action: sts:AssumeRoleWithSAML
+          - Sid: OIDCTrust
+            Effect: Allow
+            Principal:
+              # This provider already exists because it authenticates the
+              # workflow itself. A fabricated OIDC path cannot pass IAM's live
+              # discovery/JWKS validation.
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:sub: repo:AWSHound@310414322/AWSHound@1315600440:ref:refs/heads/main
+      Policies:
+        - PolicyName: goawshound-integration-stackset-administration
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/goawshound-integration-stackset-execution
+
+  TargetRolePolicyAttachment:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: goawshound-integration-role-managed-policy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: HarmlessRolePermission
+            Effect: Allow
+            Action: s3:GetBucketLocation
+            Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}
+      Roles:
+        - !Ref TargetRole
+
+  StackSetExecutionRole:
+    Type: AWS::IAM::Role
+    DependsOn: TargetRole
+    Properties:
+      RoleName: goawshound-integration-stackset-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/goawshound-integration-target
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: goawshound-integration-empty-stackset
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: cloudformation:*
+                Resource: "*"
+
+  FixtureStackSet:
+    Type: AWS::CloudFormation::StackSet
+    DependsOn:
+      - StackSetExecutionRole
+    Properties:
+      AdministrationRoleARN: !GetAtt TargetRole.Arn
+      Description: Empty awshound integration StackSet used only for graph collection.
+      ExecutionRoleName: goawshound-integration-stackset-execution
+      PermissionModel: SELF_MANAGED
+      StackSetName: goawshound-integration-stackset
+      TemplateBody: |
+        AWSTemplateFormatVersion: "2010-09-09"
+        Resources:
+          FixtureHandle:
+            Type: AWS::CloudFormation::WaitConditionHandle
+
+  FixtureFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          def handler(event, context):
+              return "goawshound-integration"
+      FunctionName: goawshound-integration-function
+      Handler: index.handler
+      Role: !GetAtt TargetRole.Arn
+      Runtime: python3.12
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  ExternalInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FixtureFunction
+      Principal: !Ref SecondaryAccountId
+
+  FixtureParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Description: Non-secret awshound integration parameter.
+      Name: /goawshound/integration/parameter
+      Type: String
+      Value: goawshound-integration
+      Tags:
+        managed-by: goawshound-integration-tests
+
+  LambdaPrimitiveUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-lambda-primitives
+      Policies:
+        - PolicyName: goawshound-integration-lambda-primitives
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Omit UpdateFunctionConfiguration so neither Lambda meta can fire.
+              - Effect: Allow
+                Action:
+                  - lambda:AddPermission
+                  - lambda:CreateEventSourceMapping
+                  - lambda:CreateFunctionUrlConfig
+                  - lambda:DeleteFunction
+                  - lambda:InvokeFunction
+                  - lambda:RemovePermission
+                  - lambda:UpdateFunctionCode
+                Resource: "*"
+
+  LambdaConfigurationUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-lambda-configuration
+      Policies:
+        - PolicyName: goawshound-integration-lambda-configuration
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:UpdateFunctionConfiguration
+                Resource: "*"
+
+  LambdaWriteUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-lambda-write
+      Policies:
+        - PolicyName: goawshound-integration-lambda-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - lambda:UpdateFunctionCode
+                  - lambda:UpdateFunctionConfiguration
+                Resource: "*"
+
+  KMSPrimitiveUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-kms-primitives
+      Policies:
+        - PolicyName: goawshound-integration-kms-primitives
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Omit GenerateDataKey so neither KMS meta can fire.
+              - Effect: Allow
+                Action:
+                  - kms:CreateGrant
+                  - kms:Decrypt
+                  - kms:DisableKey
+                  - kms:Encrypt
+                  - kms:PutKeyPolicy
+                  - kms:ScheduleKeyDeletion
+                Resource: "*"
+
+  KMSGenerateUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-kms-generate
+      Policies:
+        - PolicyName: goawshound-integration-kms-generate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: kms:GenerateDataKey
+                Resource: "*"
+
+  KMSReadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-kms-read
+      Policies:
+        - PolicyName: goawshound-integration-kms-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: "*"
+
+  DeniedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-denied
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DirectTrustAllowedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-direct-trust-allowed
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DirectTrustDeniedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-direct-trust-denied
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      Policies:
+        - PolicyName: goawshound-integration-direct-trust-deny
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Deny
+                Action: sts:AssumeRole
+                Resource: "*"
+
+  DirectTrustBoundaryAllowedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: goawshound-integration-direct-trust-boundary-allowed
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Resource: "*"
+
+  DirectTrustBoundaryDeniedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: goawshound-integration-direct-trust-boundary-denied
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:GetBucketLocation
+            Resource: "*"
+
+  DirectTrustBoundaryAllowedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-direct-trust-boundary-allowed
+      PermissionsBoundary: !Ref DirectTrustBoundaryAllowedPolicy
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DirectTrustBoundaryDeniedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-direct-trust-boundary-denied
+      PermissionsBoundary: !Ref DirectTrustBoundaryDeniedPolicy
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DirectTrustResourceDeniedUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-direct-trust-resource-denied
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  DirectTrustRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-direct-trust-target
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ExactSameAccountPrincipals
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt DirectTrustAllowedUser.Arn
+                - !GetAtt DirectTrustDeniedUser.Arn
+                - !GetAtt DirectTrustBoundaryAllowedUser.Arn
+                - !GetAtt DirectTrustBoundaryDeniedUser.Arn
+                - !GetAtt DirectTrustResourceDeniedUser.Arn
+            Action: sts:AssumeRole
+          - Sid: ExplicitTrustDeny
+            Effect: Deny
+            Principal:
+              AWS: !GetAtt DirectTrustResourceDeniedUser.Arn
+            Action: sts:AssumeRole
+
+  AccountDelegatedTrustRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-account-delegated-trust-target
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountRequiresIdentityDelegation
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: sts:AssumeRole
+
+  S3ACLReader:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-acl
+      Policies:
+        - PolicyName: goawshound-integration-s3-acl-primitives
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:GetObjectAcl
+                Resource: "*"
+
+  S3BucketAllUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-bucket-all
+      Policies:
+        - PolicyName: goawshound-integration-s3-bucket-all
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketAcl
+                  - s3:GetBucketPolicy
+                  - s3:PutObject
+                  - s3:DeleteBucket
+                  - s3:DeleteBucketPolicy
+                  - s3:PutBucketAcl
+                  - s3:PutBucketPolicy
+                  - s3:PutBucketPublicAccessBlock
+                  - s3:PutBucketOwnershipControls
+                Resource: "*"
+
+  S3BucketWriteUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-bucket-write
+      Policies:
+        - PolicyName: goawshound-integration-s3-bucket-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketAcl
+                  - s3:GetBucketPolicy
+                  - s3:PutObject
+                Resource: "*"
+
+  S3BucketReadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-bucket-read
+      Policies:
+        - PolicyName: goawshound-integration-s3-bucket-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetBucketAcl
+                  - s3:GetBucketPolicy
+                Resource: "*"
+
+  S3ObjectAllUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-object-all
+      Policies:
+        - PolicyName: goawshound-integration-s3-object-all
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:PutObjectAcl
+                Resource: "*"
+
+  S3ObjectWriteUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-object-write
+      Policies:
+        - PolicyName: goawshound-integration-s3-object-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                  - s3:PutObject
+                Resource: "*"
+
+  S3ObjectReadUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: goawshound-integration-s3-object-read
+      Policies:
+        - PolicyName: goawshound-integration-s3-object-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectAcl
+                Resource: "*"
+
+  CrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref PrimaryRoleName
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TrustSecondaryFixtureUser
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${SecondaryAccountId}:user/${ExternalUserName}
+            Action: sts:AssumeRole
+
+  PrincipalTagTrustTargetRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: goawshound-integration-principal-tag-target
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PersistentCallerTagTrust
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${SecondaryAccountId}:root
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:PrincipalTag/Student: student01
+
+  IntegrationBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: managed-by
+          Value: goawshound-integration-tests
+
+  IntegrationBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref IntegrationBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSecondaryFixtureUserRead
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${SecondaryAccountId}:user/${ExternalUserName}
+            Action: s3:GetObject
+            Resource: !Sub arn:${AWS::Partition}:s3:::${BucketName}/integration-fixture.txt
+
+Outputs:
+  BucketName:
+    Value: !Ref IntegrationBucket
+  CrossAccountRoleArn:
+    Value: !GetAtt CrossAccountRole.Arn
+  ReaderUserArn:
+    Value: !GetAtt ReaderUser.Arn
+  DeniedUserArn:
+    Value: !GetAtt DeniedUser.Arn
+  EdgeOperatorArn:
+    Value: !GetAtt EdgeOperator.Arn
+  TargetUserArn:
+    Value: !GetAtt TargetUser.Arn
+  TargetRoleArn:
+    Value: !GetAtt TargetRole.Arn
