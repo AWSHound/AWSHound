@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Lambda Code Injection",
+  "query": "MATCH p=(source)-[:AWS_CanUpdateLambdaCode|AWS_CanUpdateLambdaConfiguration|AWS_LambdaFunctionWrite|AWS_LambdaFunctionAll]->(f:AWS_LambdaFunction)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can overwrite a Lambda function's code or configuration. Combined with the function's execution role, this is code execution as that role."
+}

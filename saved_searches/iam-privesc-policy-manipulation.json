@@ -1,0 +1,5 @@
+{
+  "name": "AWS: IAM Privilege Escalation via Policy Manipulation",
+  "query": "MATCH p=(source)-[:AWS_CanAttachUserPolicy|AWS_CanAttachRolePolicy|AWS_CanAttachGroupPolicy|AWS_CanPutUserPolicy|AWS_CanPutRolePolicy|AWS_CanPutGroupPolicy|AWS_CanSetDefaultPolicyVersion|AWS_CanCreatePolicyVersion]->(target)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can attach or inline IAM policies, set a managed policy's default version, or publish a new default managed-policy version, on another principal. Any of these is a direct path to AdministratorAccess."
+}

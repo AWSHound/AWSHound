@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Workloads and the Roles They Run As",
+  "query": "MATCH p=(w)-[:AWS_RunsAs]->(r:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Compute workloads (Lambda functions, EC2 instances, CloudFormation stacks) and the IAM execution role each runs as. Compromising a workload (code replacement, template rewrite, or instance code execution) yields that role's credentials, so these are the next hop from any workload-compromise edge."
+}

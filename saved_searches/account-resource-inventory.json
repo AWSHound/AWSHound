@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Account Resource Inventory",
+  "query": "MATCH p=(a:AWS_Account)-[:AWS_Contains]->(n)\nRETURN p\nLIMIT 1000",
+  "description": "Direct containment edges from each account to the principals and resources it owns. Useful for scoping and visualization."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS: EKS IRSA / Pod Identity Role Assumption",
+  "query": "MATCH p=(source)-[:AWS_CanAssumeRoleViaIRSA|AWS_CanAssumeRoleViaPodIdentity]->(r:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Kubernetes workloads that can assume AWS IAM roles through IRSA (OIDC) or EKS Pod Identity — the bridge from in-cluster compromise to AWS credentials."
+}

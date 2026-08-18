@@ -1,0 +1,5 @@
+{
+  "name": "AWS: EC2 Instance Profile Association Abuse",
+  "query": "MATCH p=(source)-[:AWS_CanAssociateIAMInstanceProfile|AWS_CanReplaceIAMInstanceProfileAssociation]->(i:AWS_EC2Instance)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can associate or replace an instance's IAM instance profile — attaching a more privileged role to an instance they control."
+}

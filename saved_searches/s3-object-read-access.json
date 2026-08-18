@@ -1,0 +1,5 @@
+{
+  "name": "AWS: S3 Object Read Access",
+  "query": "MATCH p=(source)-[:AWS_CanGetObject|AWS_S3ObjectRead|AWS_S3ObjectAll]->(o:AWS_S3Object)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can read S3 objects (GetObject / object-read meta edges). Use to locate who can exfiltrate data from sensitive buckets."
+}

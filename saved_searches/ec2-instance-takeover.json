@@ -1,0 +1,5 @@
+{
+  "name": "AWS: EC2 Instance Takeover Primitives",
+  "query": "MATCH p=(source)-[:AWS_CanModifyEC2InstanceAttribute|AWS_EC2CanVolumeSwap|AWS_CanGetPasswordData]->(i:AWS_EC2Instance)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can modify instance attributes (e.g. user data), swap volumes, or read Windows password data — paths to controlling an instance and its role credentials."
+}

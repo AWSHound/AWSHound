@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Principals That Can Become Admin",
+  "query": "MATCH p=(source)-[:AWS_CanCreateAndAssumeAdminRole|AWS_CanCreateAndPassAdminRole|AWS_CanCreateAndAccessAdminUser|AWS_CanUpdateSelfPolicy|AWS_CanUpdateOtherPolicy|AWS_CanUpdateAssumeRolePolicyAndAssume]->(target)\nRETURN p\nLIMIT 1000",
+  "description": "Composite escalation edges where a principal can create-and-assume or create-and-pass an admin role, create-and-access an admin user, or rewrite a policy/trust to assume admin. These are guaranteed admin-equivalent capabilities."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS: EKS Cluster Node Group Roles",
+  "query": "MATCH p=(c:AWS_EKSCluster)-[:AWS_ClusterHasNodeGroup]->(ng:AWS_EKSNodeGroup)-[:AWS_NodeGroupHasRole]->(r:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Cluster to node-group to node-role chains. Node group roles are assumable by workloads scheduled on the cluster and are common pivot points."
+}

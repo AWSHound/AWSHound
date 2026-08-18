@@ -1,0 +1,5 @@
+{
+  "name": "AWS: KMS Key Policy / Grant Abuse",
+  "query": "MATCH p=(source)-[:AWS_CanModifyKMSKeyPolicy|AWS_CanCreateKMSGrant|AWS_CanSelfGrantKMSOps]->(k:AWS_KMSKey)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can modify a KMS key policy, create grants, or self-grant operations — escalation to use a key they were not directly granted."
+}

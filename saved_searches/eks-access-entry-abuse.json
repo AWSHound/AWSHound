@@ -1,0 +1,5 @@
+{
+  "name": "AWS: EKS Access Entry / Pod Identity Provisioning",
+  "query": "MATCH p=(source)-[:AWS_CanCreateAndAssociateEKSAccessEntry|AWS_CanCreateEKSPodIdentityAssociation]->(target)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can create EKS access entries or pod identity associations, granting themselves or a workload Kubernetes/AWS access on a cluster."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Identity Provider Tampering",
+  "query": "MATCH p=(source)-[:AWS_CanUpdateSAMLProvider|AWS_CanUpdateOIDCProviderThumbprint]->(target)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can modify a SAML provider or an OIDC provider thumbprint — control of federation trust roots enables assuming any role that trusts the provider."
+}

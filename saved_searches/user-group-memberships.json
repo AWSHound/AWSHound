@@ -1,0 +1,5 @@
+{
+  "name": "AWS: User Group Memberships",
+  "query": "MATCH p=(u:AWS_User)-[:AWS_MemberOf]->(g:AWS_Group)\nRETURN p\nLIMIT 1000",
+  "description": "User-to-group membership relationships for access review."
+}

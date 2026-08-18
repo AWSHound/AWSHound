@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Role Assumption Paths",
+  "query": "MATCH p=(source)-[:AWS_CanAssumeRole]->(target:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "All principals that can assume a role via sts:AssumeRole (resolved through identity policy and the role's trust policy)."
+}

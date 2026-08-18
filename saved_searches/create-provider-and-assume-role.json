@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Create Identity Provider and Assume Role",
+  "query": "MATCH p=(source)-[:AWS_CanCreateOIDCProviderAndAssumeRole|AWS_CanCreateSAMLProviderAndAssumeRole]->(target:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can register a malicious OIDC or SAML identity provider (iam:CreateOpenIDConnectProvider / iam:CreateSAMLProvider) and rewrite a role's trust policy (iam:UpdateAssumeRolePolicy), then assume the role via federation with a token/assertion they control. A direct escalation into the target role."
+}

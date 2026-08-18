@@ -1,0 +1,5 @@
+{
+  "name": "AWS: S3 Bucket Policy / Public-Access Tampering",
+  "query": "MATCH p=(source)-[:AWS_CanPutBucketPolicy|AWS_CanDeleteBucketPolicy|AWS_CanPutBucketPublicAccessBlock]->(b:AWS_S3Bucket)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can rewrite or delete a bucket policy or relax public-access-block settings, enabling data exposure."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS: CloudFormation Stack Create / Update Abuse",
+  "query": "MATCH p=(source)-[:AWS_CanCreateCloudFormationStack|AWS_CanUpdateCloudFormationStack|AWS_CanExecuteCloudFormationChangeSet]->(s:AWS_CloudFormationStack)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can create or update CloudFormation stacks, or stage and execute a change set against one. With the stack's service role, the stack can provision arbitrary privileged resources and the path continues into that role."
+}

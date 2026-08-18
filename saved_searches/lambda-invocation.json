@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Lambda Invocation Access",
+  "query": "MATCH p=(source)-[:AWS_CanInvokeLambdaFunction]->(f:AWS_LambdaFunction)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can invoke Lambda functions (via IAM or the function resource policy), including cross-account and public-URL invocation surfaces."
+}

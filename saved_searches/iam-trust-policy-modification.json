@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Role Trust Policy Modification",
+  "query": "MATCH p=(source)-[:AWS_CanUpdateAssumeRolePolicy]->(target:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can rewrite a role's assume-role (trust) policy, letting an attacker grant themselves or anyone the ability to assume the role."
+}

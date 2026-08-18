@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Access Key Creation on Other Users",
+  "query": "MATCH p=(source:AWS_User)-[:AWS_CanCreateAccessKey]->(target:AWS_User)\nWHERE source <> target\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can create access keys for a different IAM user — a persistence and impersonation primitive."
+}

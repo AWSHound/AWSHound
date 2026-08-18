@@ -1,0 +1,5 @@
+{
+  "name": "AWS: AdministratorAccess Attachments",
+  "query": "MATCH p=(n)-[:AWS_HasPolicy]->(:AWS_Policy {arn: \"arn:aws:iam::aws:policy/AdministratorAccess\"})\nRETURN p\nLIMIT 1000",
+  "description": "Every principal (user, role, or group) with the AWS-managed AdministratorAccess policy attached. Baseline for least-privilege review."
+}

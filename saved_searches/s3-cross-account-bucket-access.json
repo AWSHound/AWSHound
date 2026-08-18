@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Cross-Account S3 Bucket Access",
+  "query": "MATCH p=(source)-[:AWS_S3BucketRead|AWS_S3BucketWrite|AWS_S3BucketAll]->(b:AWS_S3Bucket)\nWHERE source.account_id <> b.account_id\nRETURN p\nLIMIT 1000",
+  "description": "Bucket-level access edges that cross an account boundary — principals reaching buckets owned by a different account via bucket policy or IAM."
+}

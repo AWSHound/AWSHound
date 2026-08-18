@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Console Login Profile Takeover",
+  "query": "MATCH p=(source)-[:AWS_CanCreateLoginProfile|AWS_CanUpdateLoginProfile]->(target:AWS_User)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can create or overwrite another user's console login profile (password), enabling account takeover."
+}

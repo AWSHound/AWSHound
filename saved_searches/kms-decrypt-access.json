@@ -1,0 +1,5 @@
+{
+  "name": "AWS: KMS Decrypt Access",
+  "query": "MATCH p=(source)-[:AWS_CanDecryptKMSKey|AWS_KMSKeyRead|AWS_KMSKeyAll]->(k:AWS_KMSKey)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can decrypt with a KMS key (directly or via key-read meta edges). Pair with encrypted resources to find who can unwrap protected data."
+}

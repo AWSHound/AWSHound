@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Federated Role Assumption (SAML / OIDC)",
+  "query": "MATCH p=()-[:AWS_CanAssumeRoleWithSAML|AWS_CanAssumeRoleWithWebIdentity]->(target:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Roles assumable through SAML or OIDC web-identity federation. Review that each federated trust is intentional and tightly scoped."
+}

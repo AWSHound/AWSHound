@@ -1,0 +1,5 @@
+{
+  "name": "AWS: MFA Device Tampering",
+  "query": "MATCH p=(source)-[:AWS_CanDeactivateMFADevice|AWS_CanDeleteVirtualMFADevice]->(target)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can deactivate or delete MFA devices, weakening accounts protected by MFA conditions."
+}

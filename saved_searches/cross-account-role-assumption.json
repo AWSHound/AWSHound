@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Cross-Account Role Assumption",
+  "query": "MATCH p=(source)-[:AWS_CanAssumeRole]->(target:AWS_Role)\nWHERE source.account_id <> target.account_id\nRETURN p\nLIMIT 1000",
+  "description": "Role assumption edges that cross an account boundary — the lateral-movement paths between accounts in the graph."
+}

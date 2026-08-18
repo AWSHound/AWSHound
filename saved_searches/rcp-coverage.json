@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Resource Control Policy Coverage",
+  "query": "MATCH p=(a:AWS_Account)-[:AWS_HasRCP]->(rcp:AWS_ResourceControlPolicy)\nRETURN p\nLIMIT 1000",
+  "description": "Which accounts have which RCPs applied. Resource control policies are the resource-side organizational guardrail (the complement of SCPs); gaps in coverage indicate accounts whose resources run without org-level access restrictions."
+}

@@ -1,0 +1,5 @@
+{
+  "name": "AWS: PassRole to Service",
+  "query": "MATCH p=(source)-[:AWS_CanPassRoleToService]->(target:AWS_Role)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can pass a role to an AWS service (EC2, Lambda, CloudFormation, SSM, EKS, ...). Combined with the ability to run that service, PassRole is a primary escalation primitive."
+}

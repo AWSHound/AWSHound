@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Shortest Path From Any User to an Admin Role",
+  "query": "MATCH p=shortestPath((u:AWS_User)-[*1..8]->(admin:AWS_Role))\nWHERE (admin)-[:AWS_HasPolicy]->(:AWS_Policy {arn: \"arn:aws:iam::aws:policy/AdministratorAccess\"})\nRETURN p\nLIMIT 25",
+  "description": "Shortest attack path from each IAM user to any role holding AdministratorAccess. Surfaces the cheapest privilege-escalation route to administrative control."
+}

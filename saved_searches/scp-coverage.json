@@ -1,0 +1,5 @@
+{
+  "name": "AWS: Service Control Policy Coverage",
+  "query": "MATCH p=(a:AWS_Account)-[:AWS_HasSCP]->(scp:AWS_ServiceControlPolicy)\nRETURN p\nLIMIT 1000",
+  "description": "Which accounts have which SCPs applied. Gaps in SCP coverage indicate accounts running without organizational guardrails."
+}

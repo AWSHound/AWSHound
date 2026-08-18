@@ -1,0 +1,5 @@
+{
+  "name": "AWS: SSM Command / Session Execution on Instances",
+  "query": "MATCH p=(source)-[:AWS_SSMCanSendCommand|AWS_SSMCanStartSession]->(i:AWS_EC2Instance)\nRETURN p\nLIMIT 1000",
+  "description": "Principals that can run commands or open sessions on SSM-managed EC2 instances — code execution as the instance role."
+}
