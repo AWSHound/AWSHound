@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AWSHound/AWSHound/internal/metrics"
+	"github.com/AWSHound/AWSHound/internal/model"
 	"github.com/AWSHound/AWSHound/internal/progress"
 	"github.com/AWSHound/AWSHound/internal/runtime"
 	"github.com/AWSHound/AWSHound/internal/store"
@@ -99,9 +100,9 @@ func cmdCollect(args []string) {
 	// so the on-disk files are simply left in place as this run's output.
 	var resumed []string
 	if resume {
-		resumed = planResume(boots, out, nil, reporter, verbose)
+		resumed = planResume(boots, out, nil, nil, reporter, verbose)
 	}
-	files, ran, collectErr := collectToDir(ctx, boots, out, nil, resolveAccountConc(accountConc), reporter, verbose, m, errLog)
+	files, ran, collectErr := collectToDir(ctx, boots, out, nil, nil, resolveAccountConc(accountConc), reporter, verbose, m, errLog)
 	finishCollectErrors(errLog, defaultErrorLogPath(errorLog, out), reporter)
 	if collectErr != nil {
 		if stopForAPILimit(reporter, m, metricsOut, api, len(boots)) {
@@ -141,7 +142,7 @@ func cmdCollect(args []string) {
 // populated store without reading the raw directory back from disk. It returns the
 // number of files written and the sorted set of services collected. A fetch,
 // write, or ingest failure is fatal. Shared by the `collect` and `all` subcommands.
-func collectToDir(ctx context.Context, boots []bootedSession, out string, st *store.Store, accountConc int, reporter progress.Reporter, verbose bool, m *metrics.RunMetrics, errLog *runtime.CollectErrorLog) (int, []string, error) {
+func collectToDir(ctx context.Context, boots []bootedSession, out string, st *store.Store, s3Filter *model.S3FilterConfig, accountConc int, reporter progress.Reporter, verbose bool, m *metrics.RunMetrics, errLog *runtime.CollectErrorLog) (int, []string, error) {
 	total := 0
 	for _, b := range boots {
 		total += runtime.CollectUnits(b.collectors, b.regions)
@@ -215,7 +216,7 @@ func collectToDir(ctx context.Context, boots []bootedSession, out string, st *st
 				// re-reading the file we just wrote. Safe concurrently: the store
 				// serializes per-account writes and ARN interning.
 				if st != nil {
-					if err := runtime.IngestData(st, b.accountID, fr.Service, fr.Data); err != nil {
+					if err := runtime.IngestDataFiltered(st, b.accountID, fr.Service, fr.Data, s3Filter); err != nil {
 						results[i].err = fmt.Errorf("ingest %s/%s: %w", b.accountID, fr.Service, err)
 						return
 					}

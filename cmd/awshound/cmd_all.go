@@ -149,6 +149,7 @@ func cmdAll(args []string) {
 	reporter, m := makeReporter(verbose, metricsOut, env)
 	defer reporter.Stop()
 
+	s3f := loadS3Filter(s3Filter)
 	s := store.New()
 	var ran []string
 	live := false
@@ -160,7 +161,7 @@ func cmdAll(args []string) {
 			reporter.Log(fmt.Sprintf("ingested GAAD for account %s", acct))
 		}
 	case "dir":
-		ran = ingestDir(s, inputDir, reporter, verbose, loadS3Filter(s3Filter))
+		ran = ingestDir(s, inputDir, reporter, verbose, s3f)
 		m.SetCollectors(ran)
 	case "live":
 		live = true
@@ -187,9 +188,9 @@ func cmdAll(args []string) {
 		// layout is keyed by, and its cost is negligible beside collection).
 		var resumed []string
 		if resume {
-			resumed = planResume(boots, rawDir, s, reporter, verbose)
+			resumed = planResume(boots, rawDir, s, s3f, reporter, verbose)
 		}
-		_, ran, err = collectToDir(ctx, boots, rawDir, s, resolveAccountConc(accountConc), reporter, verbose, m, errLog)
+		_, ran, err = collectToDir(ctx, boots, rawDir, s, s3f, resolveAccountConc(accountConc), reporter, verbose, m, errLog)
 		finishCollectErrors(errLog, defaultErrorLogPath(errorLog, out), reporter)
 		if err != nil {
 			if stopForAPILimit(reporter, m, metricsOut, api, len(s.Accounts())) {

@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/AWSHound/AWSHound/internal/model"
 	"github.com/AWSHound/AWSHound/internal/store"
 )
 
@@ -41,7 +42,7 @@ func TestPlanResumeSkipsPresentUnitsPerService(t *testing.T) {
 	s := store.New()
 	boots := []bootedSession{{accountID: acct, collectors: []string{"iam", "ec2", "s3"}}}
 
-	resumed := planResume(boots, root, s, nopReporter{}, false)
+	resumed := planResume(boots, root, s, nil, nopReporter{}, false)
 
 	if want := []string{"iam"}; !reflect.DeepEqual(resumed, want) {
 		t.Errorf("resumed = %v, want %v", resumed, want)
@@ -67,7 +68,7 @@ func TestPlanResumeMissingUnitAndAccountDirCollectsEverything(t *testing.T) {
 	// full collection, never silently skipping the account.
 	boots := []bootedSession{{accountID: "999988887777", collectors: []string{"iam", "s3"}}}
 
-	resumed := planResume(boots, root, store.New(), nopReporter{}, false)
+	resumed := planResume(boots, root, store.New(), nil, nopReporter{}, false)
 
 	if len(resumed) != 0 {
 		t.Errorf("resumed = %v, want none", resumed)
@@ -88,7 +89,7 @@ func TestWriteRawFileIsAtomicAndValid(t *testing.T) {
 		t.Fatalf("writeRawFile: %v", err)
 	}
 	// The final file must exist as a completed unit resume recognizes as ec2.
-	if !resumeUnit(store.New(), path, "ec2") {
+	if !resumeUnit(store.New(), path, "ec2", nil) {
 		t.Fatalf("written file is not recognized as a completed ec2 unit")
 	}
 	// ...and no temp file may be left behind in the directory.
@@ -115,7 +116,7 @@ func TestPlanResumeStorelessSkipsPresentUnits(t *testing.T) {
 
 	boots := []bootedSession{{accountID: acct, collectors: []string{"iam", "ec2", "s3"}}}
 
-	resumed := planResume(boots, root, nil, nopReporter{}, false)
+	resumed := planResume(boots, root, nil, nil, nopReporter{}, false)
 
 	if want := []string{"iam"}; !reflect.DeepEqual(resumed, want) {
 		t.Errorf("resumed = %v, want %v", resumed, want)
@@ -132,12 +133,55 @@ func TestPlanResumeEmptyFileReFetches(t *testing.T) {
 	writeRaw(t, root, acct, "s3", ``)
 
 	boots := []bootedSession{{accountID: acct, collectors: []string{"s3"}}}
-	resumed := planResume(boots, root, store.New(), nopReporter{}, false)
+	resumed := planResume(boots, root, store.New(), nil, nopReporter{}, false)
 
 	if len(resumed) != 0 {
 		t.Errorf("resumed = %v, want none (empty file)", resumed)
 	}
 	if want := []string{"s3"}; !reflect.DeepEqual(boots[0].collectors, want) {
 		t.Errorf("collectors = %v, want %v", boots[0].collectors, want)
+	}
+}
+
+func TestPlanResumeAppliesS3FilterToResumedStore(t *testing.T) {
+	root := t.TempDir()
+	const acct = "333344445555"
+	writeRaw(t, root, acct, "s3", `{
+		"AccountId": "333344445555",
+		"Buckets": [
+			{"Name": "keep-bucket", "Arn": "arn:aws:s3:::keep-bucket", "Objects": [{"Key": "secret.txt"}]},
+			{"Name": "drop-logging-bucket", "Arn": "arn:aws:s3:::drop-logging-bucket"}
+		]
+	}`)
+
+	filterPath := filepath.Join(t.TempDir(), "s3-filter.json")
+	filterJSON := `{
+		"version": 1,
+		"default": "exclude",
+		"rules": [
+			{"action": "include", "target": "bucket", "match": {"name": {"exact": "keep-bucket"}}}
+		]
+	}`
+	if err := os.WriteFile(filterPath, []byte(filterJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := model.LoadS3Filter(filterPath)
+	if err != nil {
+		t.Fatalf("LoadS3Filter: %v", err)
+	}
+
+	s := store.New()
+	boots := []bootedSession{{accountID: acct, collectors: []string{"s3"}}}
+	resumed := planResume(boots, root, s, cfg, nopReporter{}, false)
+
+	if want := []string{"s3"}; !reflect.DeepEqual(resumed, want) {
+		t.Fatalf("resumed = %v, want %v", resumed, want)
+	}
+	buckets := s.Account(acct).S3BucketList()
+	if len(buckets) != 1 || buckets[0].Name != "keep-bucket" {
+		t.Fatalf("resumed store buckets = %+v, want only [keep-bucket]", buckets)
+	}
+	if len(buckets[0].Objects) != 0 {
+		t.Fatalf("resumed store objects = %+v, want none under default=exclude", buckets[0].Objects)
 	}
 }

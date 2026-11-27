@@ -96,6 +96,22 @@ func ingestAs[T any](fn func(*store.Store, string, *T)) func(*store.Store, strin
 // read-back from disk. Returns an error for an unknown service or a payload whose
 // type doesn't match the service.
 func IngestData(s *store.Store, accountID, service string, data any) error {
+	return IngestDataFiltered(s, accountID, service, data, nil)
+}
+
+// IngestDataFiltered is IngestData with an optional S3FilterConfig applied to "s3"
+// payloads before they enter the store (mirroring ingest.Directory / ingest.File).
+// Raw data passed in is never mutated, so callers writing raw/<account>/s3.json
+// persist the complete unfiltered payload while bounding the in-memory graph.
+func IngestDataFiltered(s *store.Store, accountID, service string, data any, s3Filter *model.S3FilterConfig) error {
+	if service == "s3" && s3Filter != nil {
+		d, ok := data.(*model.S3Data)
+		if !ok || d == nil {
+			return fmt.Errorf("unexpected fetch result type %T", data)
+		}
+		store.IngestS3(s, accountID, s3Filter.FilterS3Data(d))
+		return nil
+	}
 	for _, def := range allServices() {
 		if def.Name == service {
 			return def.Ingest(s, accountID, data)

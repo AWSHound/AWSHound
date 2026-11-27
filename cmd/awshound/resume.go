@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/AWSHound/AWSHound/internal/ingest"
+	"github.com/AWSHound/AWSHound/internal/model"
 	"github.com/AWSHound/AWSHound/internal/progress"
 	"github.com/AWSHound/AWSHound/internal/store"
 )
@@ -40,7 +41,7 @@ import (
 //
 // It mutates boots[i].collectors in place and returns the sorted set of services
 // resumed from disk, for the run's reported collector union.
-func planResume(boots []bootedSession, rawDir string, st *store.Store, reporter progress.Reporter, verbose bool) []string {
+func planResume(boots []bootedSession, rawDir string, st *store.Store, s3Filter *model.S3FilterConfig, reporter progress.Reporter, verbose bool) []string {
 	planned := 0
 	for _, b := range boots {
 		planned += len(b.collectors)
@@ -54,7 +55,7 @@ func planResume(boots []bootedSession, rawDir string, st *store.Store, reporter 
 		for _, svc := range boots[i].collectors {
 			reporter.Advance(1)
 			path := filepath.Join(rawDir, boots[i].accountID, svc+".json")
-			if resumeUnit(st, path, svc) {
+			if resumeUnit(st, path, svc, s3Filter) {
 				resumed[svc] = true
 				onDisk++
 				if verbose {
@@ -77,18 +78,17 @@ func planResume(boots []bootedSession, rawDir string, st *store.Store, reporter 
 // returns false (re-fetch) for a missing, empty, or truncated/unparseable file,
 // and — defensively — for a file whose content classifies as a different service
 // than its name claims (a sign of a hand-corrupted raw tree), so a real slot is
-// never left unfilled by a mislabeled payload. The S3 filter is intentionally nil:
-// live collection writes unfiltered raw (the --s3-filter only applies to offline
-// --input-dir/process), so resumed files are ingested exactly as a fresh live run
-// would ingest them.
-func resumeUnit(st *store.Store, path, expected string) bool {
+// never left unfilled by a mislabeled payload. Live collection writes unfiltered
+// raw JSON on disk while s3Filter bounds what enters st, matching both fresh live
+// `all` runs and offline `--input-dir`/`process` runs.
+func resumeUnit(st *store.Store, path, expected string, s3Filter *model.S3FilterConfig) bool {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() || info.Size() == 0 {
 		return false
 	}
 	var svc string
 	if st != nil {
-		svc, err = ingest.File(st, path, nil)
+		svc, err = ingest.File(st, path, s3Filter)
 	} else {
 		svc, err = ingest.ClassifyFile(path)
 	}
