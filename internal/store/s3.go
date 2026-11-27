@@ -62,8 +62,8 @@ func (a *Account) S3BucketList() []*model.S3Bucket {
 }
 
 // S3AccountPublicAccessBlock returns the account-level Block Public Access config,
-// or nil when none was ingested (the current Go collector never sets it — see
-// IngestS3 and internal/model/s3.go).
+// or nil when none was ingested (e.g. unset on the account or denied during
+// collection; see IngestS3 and internal/collect/s3.go).
 func (a *Account) S3AccountPublicAccessBlock() *model.PublicAccessBlockConfiguration {
 	for _, v := range a.Resources(s3Service) {
 		if p, ok := v.(*model.PublicAccessBlockConfiguration); ok {
