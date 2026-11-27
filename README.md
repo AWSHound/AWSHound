@@ -119,6 +119,29 @@ region-scoped collectors with `--regions`:
 awshound all --profile prod --regions us-east-1,us-west-2 -o graph.json
 ```
 
+## Service selection & S3
+
+By default awshound collects `iam`, `kms`, `ssm`, `ec2`, `lambda`,
+`cloudformation`, `eks`, and `organizations`. `s3` is opt-in because per-bucket
+control-plane and object-listing calls can dominate runtime on bucket-heavy
+accounts.
+
+`--collectors` replaces the default collector list rather than appending to it,
+so pass the full service list (at minimum `iam,s3`) when including S3:
+
+```sh
+awshound all --profile prod \
+  --collectors iam,kms,ssm,ec2,lambda,cloudformation,eks,organizations,s3 \
+  -o graph.json
+```
+
+To bound S3 bucket/object graph volume during ingestion, pass `--s3-filter`
+with a filter config (for example [`configs/s3-filter.bucket-only.json`](configs/s3-filter.bucket-only.json)
+to retain all buckets while excluding objects, or [`configs/s3-filter.bounded.json`](configs/s3-filter.bounded.json)
+to cap objects per bucket; note that [`configs/s3-filter.default.json`](configs/s3-filter.default.json)
+sets `"default": "exclude"` without `"include"` rules and excludes all buckets
+unless customized).
+
 ## AWS API request metrics and budgets
 
 Pass `--metrics <path>` to a live `collect` or `all` run to record request-level

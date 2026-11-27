@@ -303,7 +303,13 @@ func recordBootstrapError(errLog *runtime.CollectErrorLog, label string, err err
 	})
 }
 
-// resolveCollectors returns the requested collector set, defaulting to all.
+const (
+	collectorsFlagUsage = "comma-separated services to collect; replaces the default list (default: all except s3; pass iam,kms,ssm,ec2,lambda,cloudformation,eks,organizations,s3 to include s3)"
+	regionsFlagUsage    = "comma-separated regions to collect (default: auto-discover enabled regions)"
+)
+
+// resolveCollectors returns the requested collector set, defaulting to
+// runtime.DefaultCollectors (all except s3).
 func resolveCollectors(collectors stringSlice) []string {
 	names := []string(collectors)
 	if len(names) == 0 {
