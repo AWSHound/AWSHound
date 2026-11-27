@@ -13,10 +13,7 @@ import "encoding/json"
 //   - Buckets: every bucket ListBuckets returned, each enriched with its
 //     per-bucket control-plane data.
 //   - AccountPublicAccessBlock: the account-level Block Public Access config
-//     (s3control:GetPublicAccessBlock). This build does not provision the
-//     s3control SDK, so the Go collector leaves it nil; the field exists so an
-//     externally-collected blob (e.g. from AWSHound) round-trips and so future
-//     edge processors can consume it once s3control is wired.
+//     (s3control:GetPublicAccessBlock), or nil when unset or unreadable.
 type S3Data struct {
 	AccountId                string                          `json:"AccountId"`
 	Buckets                  []S3Bucket                      `json:"Buckets"`

@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3control"
 
 	"github.com/AWSHound/AWSHound/internal/model"
 )
@@ -86,13 +87,42 @@ func (S3Collector) Fetch(ctx context.Context, s *Session) (any, error) {
 		}
 	}
 
-	// AccountPublicAccessBlock (s3control:GetPublicAccessBlock by account id) is not
-	// collected: this build provisions only service/s3, not service/s3control. The
-	// field stays nil; see internal/model/s3.go.
+	ctrlClient := s3control.NewFromConfig(s.regionCfg(""))
 	return &model.S3Data{
-		AccountId: accountID,
-		Buckets:   buckets,
+		AccountId:                accountID,
+		Buckets:                  buckets,
+		AccountPublicAccessBlock: s3AccountPAB(ctx, ctrlClient, accountID),
 	}, nil
+}
+
+// s3AccountPABAPI is the minimal s3control client surface s3AccountPAB needs, kept
+// narrow so unit tests can exercise both populated and denied/unset responses.
+type s3AccountPABAPI interface {
+	GetPublicAccessBlock(ctx context.Context, params *s3control.GetPublicAccessBlockInput, optFns ...func(*s3control.Options)) (*s3control.GetPublicAccessBlockOutput, error)
+}
+
+// s3AccountPAB fetches the account-level S3 Block Public Access configuration via
+// s3control:GetPublicAccessBlock (IAM action s3:GetAccountPublicAccessBlock). It
+// returns nil when unset (NoSuchPublicAccessBlockConfiguration) or on error
+// (e.g. AccessDenied), matching s3BucketPAB's best-effort semantics so a missing
+// permission never aborts S3 collection.
+func s3AccountPAB(ctx context.Context, client s3AccountPABAPI, accountID string) *model.PublicAccessBlockConfiguration {
+	if accountID == "" {
+		return nil
+	}
+	out, err := client.GetPublicAccessBlock(ctx, &s3control.GetPublicAccessBlockInput{
+		AccountId: aws.String(accountID),
+	})
+	if err != nil || out == nil || out.PublicAccessBlockConfiguration == nil {
+		return nil
+	}
+	c := out.PublicAccessBlockConfiguration
+	return &model.PublicAccessBlockConfiguration{
+		BlockPublicAcls:       aws.ToBool(c.BlockPublicAcls),
+		IgnorePublicAcls:      aws.ToBool(c.IgnorePublicAcls),
+		BlockPublicPolicy:     aws.ToBool(c.BlockPublicPolicy),
+		RestrictPublicBuckets: aws.ToBool(c.RestrictPublicBuckets),
+	}
 }
 
 // s3RegionOptFn returns a per-call Options override that pins a request to a
