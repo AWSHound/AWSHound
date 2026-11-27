@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 )
 
@@ -46,5 +47,14 @@ func TestWriteAndOpenZIPArtifact(t *testing.T) {
 	}
 	if string(got) != want {
 		t.Fatalf("archive contents = %q, want %q", got, want)
+	}
+	if goruntime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Errorf("archive permissions = %04o, want owner-only (0600)", perm)
+		}
 	}
 }

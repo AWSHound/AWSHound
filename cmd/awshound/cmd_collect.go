@@ -184,7 +184,7 @@ func collectToDir(ctx context.Context, boots []bootedSession, out string, st *st
 				return
 			}
 			dir := filepath.Join(out, b.accountID)
-			if err := os.MkdirAll(dir, 0o755); err != nil {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
 				results[i].err = err
 				return
 			}
@@ -286,11 +286,8 @@ func writeRawFile(path string, data any) error {
 		os.Remove(tmpName)
 		return err
 	}
-	// CreateTemp makes the file 0o600; match the 0o644 the plain write used.
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
+	// Preserve CreateTemp's 0o600 mode so collected IAM/policy artifacts are
+	// owner-readable only on multi-user hosts.
 	if err := os.Rename(tmpName, path); err != nil {
 		os.Remove(tmpName)
 		return err
