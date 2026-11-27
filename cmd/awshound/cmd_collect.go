@@ -32,12 +32,12 @@ func cmdCollect(args []string) {
 		maxAPIPerMinute                      int
 		verbose, resume                      bool
 	)
-	fs.Var(&collectors, "collectors", "comma-separated services to collect (default: all except s3; add s3 explicitly to include it)")
+	fs.Var(&collectors, "collectors", collectorsFlagUsage)
 	fs.Var(&profiles, "profile", "AWS CLI profile to collect (repeatable / comma-separated); merged with --aws-config's bloodhound_collect profiles")
 	fs.StringVar(&awsConfig, "aws-config", "", "AWS config file; collect every profile whose section sets bloodhound_collect = true")
 	fs.StringVar(&awsCreds, "aws-credentials", "", "AWS shared credentials file (default: ~/.aws/credentials)")
 	fs.StringVar(&orgRole, "org-role", "", "assume this role (e.g. OrganizationAccountAccessRole) into every account in the AWS Organization and collect them all")
-	fs.Var(&regions, "regions", "comma-separated regions (default: us-east-1)")
+	fs.Var(&regions, "regions", regionsFlagUsage)
 	fs.StringVar(&out, "o", "raw", "output directory for raw collect JSON")
 	fs.StringVar(&out, "output", "raw", "output directory (alias of -o)")
 	fs.StringVar(&metricsOut, "metrics", "", "write run metrics JSON to this path")
