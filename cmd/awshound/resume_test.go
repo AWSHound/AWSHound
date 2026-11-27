@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"testing"
 
 	"github.com/AWSHound/AWSHound/internal/store"
@@ -90,6 +91,15 @@ func TestWriteRawFileIsAtomicAndValid(t *testing.T) {
 	// The final file must exist as a completed unit resume recognizes as ec2.
 	if !resumeUnit(store.New(), path, "ec2") {
 		t.Fatalf("written file is not recognized as a completed ec2 unit")
+	}
+	if goruntime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Errorf("writeRawFile mode = %04o, want 0600", perm)
+		}
 	}
 	// ...and no temp file may be left behind in the directory.
 	entries, err := os.ReadDir(dir)

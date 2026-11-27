@@ -90,7 +90,7 @@ func (m *RunMetrics) WriteJSON(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return os.WriteFile(path, b, 0o600)
 }
 
 // buildReportLocked assembles the serializable report and its summary; caller

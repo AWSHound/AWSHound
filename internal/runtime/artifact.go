@@ -39,11 +39,11 @@ func ZIPOutputPath(path, defaultName string) string {
 // repetitive graph JSON while keeping the long-running build CPU-oriented.
 func WriteZIP(path, member string, write func(io.Writer) error) error {
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
 		}
 	}
-	f, err := os.Create(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
